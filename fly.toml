@@ -1,0 +1,30 @@
+app = "flowticx"
+primary_region = "sin"
+
+[build]
+
+[env]
+  NODE_ENV = "production"
+  AUTH_DISABLED = "false"
+  USE_DATABASE = "true"
+  PORT = "3000"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "15s"
+    method = "GET"
+    timeout = "5s"
+    path = "/api/health"
+
+[[vm]]
+  memory = "1gb"
+  cpu_kind = "shared"
+  cpus = 1
