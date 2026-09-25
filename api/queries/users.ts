@@ -23,6 +23,15 @@ export async function findUserByEmail(email: string) {
   });
 }
 
+export async function findUsersByEmail(email: string) {
+  const normalized = email.trim().toLowerCase();
+  const pattern = `^${normalized.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`;
+  return withMongoRetry(async () => {
+    const col = await getCollection<UserDoc>(Collections.users);
+    return col.find({ email: { $regex: pattern, $options: "i" } }).toArray();
+  });
+}
+
 export async function findUserByUnionId(unionId: string) {
   return withMongoRetry(async () => {
     const col = await getCollection<UserDoc>(Collections.users);

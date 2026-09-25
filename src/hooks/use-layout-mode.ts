@@ -28,6 +28,11 @@ export function getSidebarWidth(mode: LayoutMode, collapsed: boolean): number {
   return collapsed ? sizes.collapsed : sizes.expanded;
 }
 
+/** Warm client-portal sidebar is narrower than the staff chrome. */
+export function getClientSidebarWidth(collapsed: boolean): number {
+  return collapsed ? 56 : 244;
+}
+
 export function useLayoutMode(): LayoutMode {
   const [mode, setMode] = useState<LayoutMode>(readLayoutMode);
 

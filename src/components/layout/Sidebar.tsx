@@ -1,11 +1,14 @@
 import { useMemo } from "react";
 import { useLocation, useNavigate } from "react-router";
+import { ClientSidebarPanel } from "./ClientSidebar";
 import { useAuth } from "@/hooks/useAuth";
+import { isClientPortalUser } from "@/lib/client-portal";
 import { useTaskChatBadgeCount } from "@/hooks/useTaskChats";
 import { canAccessRoute } from "@/lib/permissions";
 import { canManageLeaves, isAdminOrManagement, isFinanceRoleOnly } from "@/lib/leave-policy";
 import { requestDashboardRefresh } from "@/lib/dashboard-refresh";
 import {
+  getClientSidebarWidth,
   getSidebarWidth,
   useLayoutMode,
 } from "@/hooks/use-layout-mode";
@@ -481,10 +484,16 @@ export function Sidebar({
   drawerOpen,
   onDrawerOpenChange,
 }: SidebarProps) {
+  const { user } = useAuth();
+  const clientPortal = isClientPortalUser(user);
   const layoutMode = useLayoutMode();
   const navigate = useNavigate();
   const isDrawer = layoutMode === "drawer";
-  const sidebarWidth = getSidebarWidth(layoutMode, collapsed);
+  const sidebarWidth = clientPortal
+    ? isDrawer
+      ? 0
+      : getClientSidebarWidth(collapsed)
+    : getSidebarWidth(layoutMode, collapsed);
 
   const handleNavigate = (path: string) => {
     navigate(path);
@@ -493,6 +502,22 @@ export function Sidebar({
     }
   };
 
+  const panel = clientPortal ? (
+    <ClientSidebarPanel
+      collapsed={isDrawer ? false : collapsed}
+      showCollapseToggle={!isDrawer}
+      onToggle={onToggle}
+      onNavigate={handleNavigate}
+    />
+  ) : (
+    <SidebarPanel
+      collapsed={isDrawer ? false : collapsed}
+      showCollapseToggle={!isDrawer}
+      onToggle={onToggle}
+      onNavigate={handleNavigate}
+    />
+  );
+
   if (isDrawer) {
     return (
       <Sheet open={drawerOpen} onOpenChange={onDrawerOpenChange}>
@@ -500,12 +525,7 @@ export function Sidebar({
           side="left"
           className="w-[min(280px,85vw)] max-w-[85vw] p-0 border-0 bg-transparent shadow-2xl [&>button]:hidden z-[140]"
         >
-          <SidebarPanel
-            collapsed={false}
-            showCollapseToggle={false}
-            onToggle={onToggle}
-            onNavigate={handleNavigate}
-          />
+          {panel}
         </SheetContent>
       </Sheet>
     );
@@ -516,12 +536,7 @@ export function Sidebar({
       className="fixed left-0 top-0 h-screen flex flex-col z-[120] transition-all duration-300 overflow-visible"
       style={{ width: sidebarWidth }}
     >
-      <SidebarPanel
-        collapsed={collapsed}
-        showCollapseToggle
-        onToggle={onToggle}
-        onNavigate={handleNavigate}
-      />
+      {panel}
     </aside>
   );
 }

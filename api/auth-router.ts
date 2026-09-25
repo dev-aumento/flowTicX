@@ -5,7 +5,7 @@ import { isAuthDisabled } from "./lib/dev-mode";
 import * as mock from "./lib/mock-store";
 import { updateById, findById, getCollection } from "./queries/connection";
 import { hashPassword, verifyPassword } from "./lib/password";
-import { createUser, findUserByEmail, updateLastSignIn } from "./queries/users";
+import { createUser, findUserByEmail, findUsersByEmail, updateLastSignIn } from "./queries/users";
 import { hasMongoConfigured } from "./queries/mongo";
 import { DEFAULT_PERMISSIONS_BY_ROLE } from "@db/mongo/types";
 import { syncEmployeeFromUser } from "./queries/employees";
@@ -58,6 +58,77 @@ function useMemoryStore() {
   return !hasMongoConfigured();
 }
 
+function workspaceRoleLabel(user: { role?: string | null; position?: string | null }) {
+  const position = user.position?.trim();
+  if (position) return position;
+  switch (String(user.role ?? "").toLowerCase()) {
+    case "admin":
+      return "Administrator";
+    case "manager":
+      return "Project Manager";
+    case "hr":
+      return "HR";
+    case "finance":
+      return "Account Manager";
+    case "client":
+      return "Client";
+    case "platform":
+      return "Platform Admin";
+    default:
+      return "Team Member";
+  }
+}
+
+async function findLoginUser(email: string, organizationId?: number) {
+  const normalized = email.trim().toLowerCase();
+  const matches = useMemoryStore()
+    ? mock.mockFindUsersByEmail(normalized)
+    : await findUsersByEmail(normalized);
+  if (organizationId != null && organizationId > 0) {
+    return matches.find((user) => user.organizationId === organizationId) ?? null;
+  }
+  return matches[0] ?? null;
+}
+
+async function listLoginWorkspaces(candidates: UserDoc[]) {
+  const workspaces: Array<{
+    organizationId: number;
+    organizationName: string;
+    roleLabel: string;
+  }> = [];
+  let portal: "client" | "finance" | "platform" | null = null;
+  let sawInactive = false;
+
+  for (const user of candidates) {
+    if (String(user.status).toLowerCase() !== "active") {
+      sawInactive = true;
+      continue;
+    }
+    const role = String(user.role ?? "").toLowerCase();
+    if (role === "platform") {
+      portal ??= "platform";
+      continue;
+    }
+
+    const organizationName = useMemoryStore()
+      ? mock.mockGetOrganizationName()
+      : await getOrganizationNameById(user.organizationId);
+    workspaces.push({
+      organizationId: user.organizationId && user.organizationId > 0 ? user.organizationId : 0,
+      organizationName,
+      roleLabel: workspaceRoleLabel(user),
+    });
+  }
+
+  workspaces.sort((a, b) => a.organizationName.localeCompare(b.organizationName));
+
+  return {
+    workspaces,
+    portal: workspaces.length > 0 ? null : portal,
+    inactive: workspaces.length === 0 && portal == null && sawInactive,
+  };
+}
+
 async function platformAdminExists() {
   if (useMemoryStore()) return mock.mockHasUserWithRole("platform");
   const userCol = await getCollection<UserDoc>(Collections.users);
@@ -97,7 +168,7 @@ async function assertLoginPortal(
       message: "This portal is for account managers only. Use the main login instead.",
     });
   }
-  if (normalized === "finance" && portal !== "finance") {
+  if (normalized === "finance" && portal && portal !== "finance") {
     throw new TRPCError({
       code: "FORBIDDEN",
       message: "Account managers sign in at /finance/login",
@@ -109,12 +180,6 @@ async function assertLoginPortal(
     throw new TRPCError({
       code: "FORBIDDEN",
       message: "This portal is for client workspaces. Staff accounts sign in at /login.",
-    });
-  }
-  if (!portal && clientWorkspace) {
-    throw new TRPCError({
-      code: "FORBIDDEN",
-      message: "Client workspace members sign in at /client/login",
     });
   }
 }
@@ -832,18 +897,41 @@ export const authRouter = createRouter({
       };
     }),
 
+  lookupWorkspaces: publicQuery
+    .input(z.object({ email: z.string().email().max(320) }))
+    .mutation(async ({ input }) => {
+      const email = input.email.trim().toLowerCase();
+      if (useMemoryStore()) {
+        return listLoginWorkspaces(mock.mockFindUsersByEmail(email));
+      }
+
+      try {
+        await ensureSchema();
+        return listLoginWorkspaces(await findUsersByEmail(email));
+      } catch (error) {
+        if (error instanceof TRPCError) throw error;
+        console.error("[auth] Workspace lookup failed:", error);
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Unable to look up workspaces right now. Please try again.",
+        });
+      }
+    }),
+
   login: publicQuery
     .input(
       z.object({
         email: z.string().email(),
         password: z.string().min(1),
+        /** Workspace chosen on the sign-in screen when an email belongs to more than one. */
+        organizationId: z.number().int().positive().optional(),
         /** When set to finance, only finance-role accounts may sign in. */
         portal: z.enum(["finance", "client", "platform"]).optional(),
       }),
     )
     .mutation(async ({ input, ctx }) => {
       if (useMemoryStore()) {
-        const user = mock.mockFindUserByEmail(input.email.toLowerCase());
+        const user = await findLoginUser(input.email, input.organizationId);
         if (!user?.passwordHash) {
           throw new TRPCError({
             code: "UNAUTHORIZED",
@@ -877,7 +965,7 @@ export const authRouter = createRouter({
       try {
         await ensureSchema();
 
-        const user = await findUserByEmail(input.email.toLowerCase());
+        const user = await findLoginUser(input.email, input.organizationId);
 
         if (!user?.passwordHash) {
           throw new TRPCError({

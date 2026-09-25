@@ -19,8 +19,8 @@ function LightWordmark({ className, imgClassName }: { className?: string; imgCla
         alt=""
         className={cn("h-8 w-8 flex-shrink-0 object-contain", imgClassName)}
       />
-      <span className="font-serif text-[1.65rem] font-semibold italic leading-none tracking-tight text-[#111827]">
-        Aaso
+      <span className="font-serif text-[2rem] font-semibold leading-none tracking-tight text-[#111827]">
+        aaso
       </span>
     </span> 
   );

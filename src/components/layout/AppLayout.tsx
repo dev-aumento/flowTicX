@@ -5,7 +5,7 @@ import { Topbar } from "./Topbar";
 import { AppToaster } from "@/components/ui/app-toaster";
 import { TaskNotificationToasts } from "@/components/notifications/TaskNotificationToasts";
 import { SidebarWidthContext } from "@/hooks/useSidebarWidth";
-import { getSidebarWidth, useLayoutMode } from "@/hooks/use-layout-mode";
+import { getClientSidebarWidth, getSidebarWidth, useLayoutMode } from "@/hooks/use-layout-mode";
 import { GeofenceAutoClockOut } from "@/hooks/useGeofenceAutoClockOut";
 import { useAuth } from "@/hooks/useAuth";
 import { isClientPortalUser } from "@/lib/client-portal";
@@ -19,9 +19,7 @@ export function AppLayout({ children }: { children?: ReactNode }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const sidebarWidth =
     clientPortal && layoutMode !== "drawer"
-      ? sidebarCollapsed
-        ? 56
-        : 244
+      ? getClientSidebarWidth(sidebarCollapsed)
       : getSidebarWidth(layoutMode, sidebarCollapsed);
 
   useEffect(() => {

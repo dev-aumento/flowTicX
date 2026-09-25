@@ -196,11 +196,16 @@ export function mockFindUserById(id: number): UserDoc | null {
   };
 }
 
-export function mockFindUserByEmail(email: string): UserDoc | null {
+export function mockFindUsersByEmail(email: string): UserDoc[] {
   const normalized = email.trim().toLowerCase();
-  const user = users.find((entry) => entry.email?.toLowerCase() === normalized);
-  if (!user) return null;
-  return mockFindUserById(user.id);
+  return users
+    .filter((entry) => entry.email?.toLowerCase() === normalized)
+    .map((entry) => mockFindUserById(entry.id))
+    .filter((entry): entry is UserDoc => entry != null);
+}
+
+export function mockFindUserByEmail(email: string): UserDoc | null {
+  return mockFindUsersByEmail(email)[0] ?? null;
 }
 
 export function mockHasUserWithRole(role: UserDoc["role"]) {

@@ -103,6 +103,8 @@ export function useAuth(_options?: UseAuthOptions) {
     }
   }, [user, isPending, planEnded]);
 
+  const lookupWorkspacesMutation = trpc.auth.lookupWorkspaces.useMutation();
+
   const loginMutation = trpc.auth.login.useMutation({
     onSuccess: async (result) => {
       writeAuthCache(result.user);
@@ -151,11 +153,31 @@ export function useAuth(_options?: UseAuthOptions) {
   const logoutMutation = trpc.auth.logout.useMutation();
   const resetPasswordMutation = trpc.auth.resetPassword.useMutation();
 
+  const lookupWorkspaces = useCallback(
+    (email: string) => {
+      if (AUTH_DISABLED) {
+        return Promise.resolve({
+          workspaces: [
+            {
+              organizationId: 1,
+              organizationName: "Aaso",
+              roleLabel: "Administrator",
+            },
+          ],
+          portal: null as "client" | "finance" | "platform" | null,
+          inactive: false,
+        });
+      }
+      return lookupWorkspacesMutation.mutateAsync({ email });
+    },
+    [lookupWorkspacesMutation],
+  );
+
   const login = useCallback(
     (
       email: string,
       password: string,
-      options?: { portal?: "finance" | "client" | "platform" },
+      options?: { portal?: "finance" | "client" | "platform"; organizationId?: number },
     ) => {
       if (AUTH_DISABLED) {
         return Promise.resolve({ user: DEV_USER });
@@ -164,6 +186,7 @@ export function useAuth(_options?: UseAuthOptions) {
         email,
         password,
         portal: options?.portal,
+        organizationId: options?.organizationId,
       });
     },
     [loginMutation],
@@ -293,6 +316,7 @@ export function useAuth(_options?: UseAuthOptions) {
       isAuthenticated: !!effectiveUser,
       isLoading: !authResolved || logoutMutation.isPending,
       isLoggingIn: loginMutation.isPending,
+      isLookingUpWorkspaces: lookupWorkspacesMutation.isPending,
       isRegistering:
         registerAdminMutation.isPending ||
         registerClientMutation.isPending ||
@@ -302,6 +326,7 @@ export function useAuth(_options?: UseAuthOptions) {
       loginError: loginMutation.error,
       error,
       login,
+      lookupWorkspaces,
       registerAdmin,
       registerClient,
       registerFinance,
@@ -315,6 +340,7 @@ export function useAuth(_options?: UseAuthOptions) {
       authResolved,
       logoutMutation.isPending,
       loginMutation.isPending,
+      lookupWorkspacesMutation.isPending,
       registerAdminMutation.isPending,
       registerClientMutation.isPending,
       registerFinanceMutation.isPending,
@@ -323,6 +349,7 @@ export function useAuth(_options?: UseAuthOptions) {
       loginMutation.error,
       error,
       login,
+      lookupWorkspaces,
       registerAdmin,
       registerClient,
       registerFinance,
