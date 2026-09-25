@@ -5,7 +5,7 @@ import { isAuthDisabled } from "./lib/dev-mode";
 import * as mock from "./lib/mock-store";
 import { updateById, findById, getCollection } from "./queries/connection";
 import { hashPassword, verifyPassword } from "./lib/password";
-import { createUser, findUserByEmail, findUsersByEmail, updateLastSignIn } from "./queries/users";
+import { createUser, findUserByEmail, findUserById, findUsersByEmail, updateLastSignIn } from "./queries/users";
 import { hasMongoConfigured } from "./queries/mongo";
 import { DEFAULT_PERMISSIONS_BY_ROLE } from "@db/mongo/types";
 import { syncEmployeeFromUser } from "./queries/employees";
@@ -29,6 +29,15 @@ import { ALL_PERMISSION_KEYS } from "@contracts/permissions";
 import { Collections } from "@db/mongo/collections";
 import type { OrganizationDoc, UserDoc } from "@db/mongo/types";
 import { TRPCError } from "@trpc/server";
+import {
+  consumeClientLoginCode,
+  createClientLoginTicket,
+  createLoginCode,
+  issueClientLoginCode,
+  readClientLoginTicket,
+  resendClientLoginCode,
+} from "./lib/client-login-challenge";
+import { isLoginEmailConfigured, sendClientLoginCodeEmail } from "./lib/send-login-code";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { canManageNoticePeriod } from "@/lib/leave-policy";
@@ -127,6 +136,70 @@ async function listLoginWorkspaces(candidates: UserDoc[]) {
     portal: workspaces.length > 0 ? null : portal,
     inactive: workspaces.length === 0 && portal == null && sawInactive,
   };
+}
+
+async function clientAccountsForPassword(email: string, password: string) {
+  const normalized = email.trim().toLowerCase();
+  const matches = useMemoryStore()
+    ? mock.mockFindUsersByEmail(normalized)
+    : await findUsersByEmail(normalized);
+  const passwordMatches: UserDoc[] = [];
+  for (const user of matches) {
+    if (!user.passwordHash) continue;
+    if (String(user.status).toLowerCase() !== "active") continue;
+    if (!(await verifyPassword(password, user.passwordHash))) continue;
+    passwordMatches.push(user);
+  }
+  if (passwordMatches.length === 0) {
+    throw new TRPCError({
+      code: "UNAUTHORIZED",
+      message: "Invalid email or password",
+    });
+  }
+
+  const clients: UserDoc[] = [];
+  for (const user of passwordMatches) {
+    if (await isClientWorkspaceUser(user)) clients.push(user);
+  }
+  if (clients.length === 0) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "This account is not a client workspace. Use the main sign-in page.",
+    });
+  }
+  return { email: normalized, clients };
+}
+
+async function describeClientWorkspaces(users: UserDoc[]) {
+  const workspaces = [];
+  for (const user of users) {
+    const organizationName = useMemoryStore()
+      ? mock.mockGetOrganizationName()
+      : await getOrganizationNameById(user.organizationId);
+    workspaces.push({
+      userId: user.id,
+      organizationId: user.organizationId && user.organizationId > 0 ? user.organizationId : 0,
+      organizationName,
+      roleLabel: workspaceRoleLabel(user),
+    });
+  }
+  workspaces.sort((a, b) => a.organizationName.localeCompare(b.organizationName));
+  return workspaces;
+}
+
+async function emailClientLoginCode(email: string, code: string) {
+  try {
+    const sent = await sendClientLoginCodeEmail(email, code);
+    const previewCode =
+      !sent.delivered && process.env.NODE_ENV !== "production" ? code : undefined;
+    return { delivered: sent.delivered, previewCode };
+  } catch (error) {
+    console.error("[client-login] Failed to email sign-in code:", error);
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "Unable to email the sign-in code. Please try again.",
+    });
+  }
 }
 
 async function platformAdminExists() {
@@ -916,6 +989,165 @@ export const authRouter = createRouter({
           message: "Unable to look up workspaces right now. Please try again.",
         });
       }
+    }),
+
+  beginClientLogin: publicQuery
+    .input(
+      z.object({
+        email: z.string().email().max(320),
+        password: z.string().min(1).max(128),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      if (!useMemoryStore()) await ensureSchema();
+      const { email, clients } = await clientAccountsForPassword(input.email, input.password);
+      const described = await describeClientWorkspaces(clients);
+      const ticket = await createClientLoginTicket(
+        email,
+        described.map((workspace) => ({
+          userId: workspace.userId,
+          organizationId: workspace.organizationId,
+        })),
+      );
+      return {
+        ticket,
+        workspaces: described.map(({ userId: _userId, ...workspace }) => workspace),
+      };
+    }),
+
+  sendClientLoginCode: publicQuery
+    .input(
+      z.object({
+        ticket: z.string().min(16).max(128),
+        organizationId: z.number().int().nonnegative(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const ticket = await readClientLoginTicket(input.ticket);
+      if (!ticket) {
+        throw new TRPCError({
+          code: "UNAUTHORIZED",
+          message: "Sign in again to continue.",
+        });
+      }
+      const membership = ticket.memberships.find(
+        (item) => item.organizationId === input.organizationId,
+      );
+      if (!membership) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Select a workspace to continue.",
+        });
+      }
+      const code = createLoginCode();
+      const challenge = await issueClientLoginCode({
+        email: ticket.email,
+        userId: membership.userId,
+        organizationId: membership.organizationId,
+        code,
+      });
+      const delivery = await emailClientLoginCode(ticket.email, code);
+      if (!delivery.delivered && !delivery.previewCode) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: isLoginEmailConfigured()
+            ? "Unable to email the sign-in code. Please try again."
+            : "Sign-in codes can't be emailed yet. Ask your administrator to configure outgoing email.",
+        });
+      }
+      return {
+        challengeId: challenge.id,
+        email: ticket.email,
+        delivered: delivery.delivered,
+        previewCode: delivery.previewCode,
+        resendInSeconds: 30,
+      };
+    }),
+
+  resendClientLoginCode: publicQuery
+    .input(z.object({ challengeId: z.string().min(16).max(128) }))
+    .mutation(async ({ input }) => {
+      const code = createLoginCode();
+      const result = await resendClientLoginCode(input.challengeId, code);
+      if (result.error === "cooldown") {
+        throw new TRPCError({
+          code: "TOO_MANY_REQUESTS",
+          message: `Wait ${result.retryAfterSeconds}s before requesting another code.`,
+        });
+      }
+      if (result.error === "expired" || result.error === "missing" || !result.record) {
+        throw new TRPCError({
+          code: "UNAUTHORIZED",
+          message: "This code expired. Sign in again.",
+        });
+      }
+      const delivery = await emailClientLoginCode(result.record.email, code);
+      if (!delivery.delivered && !delivery.previewCode) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Sign-in codes can't be emailed yet. Ask your administrator to configure outgoing email.",
+        });
+      }
+      return {
+        challengeId: result.record.id,
+        email: result.record.email,
+        delivered: delivery.delivered,
+        previewCode: delivery.previewCode,
+        resendInSeconds: 30,
+      };
+    }),
+
+  verifyClientLogin: publicQuery
+    .input(
+      z.object({
+        challengeId: z.string().min(16).max(128),
+        code: z.string().regex(/^\d{6}$/),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      const result = await consumeClientLoginCode(input.challengeId, input.code);
+      if (result.error === "expired") {
+        throw new TRPCError({
+          code: "UNAUTHORIZED",
+          message: "This code expired. Sign in again.",
+        });
+      }
+      if (result.error === "locked") {
+        throw new TRPCError({
+          code: "TOO_MANY_REQUESTS",
+          message: "Too many incorrect codes. Sign in again.",
+        });
+      }
+      if (result.error !== null || !result.record) {
+        throw new TRPCError({
+          code: "UNAUTHORIZED",
+          message: "That code is incorrect.",
+        });
+      }
+
+      const user = useMemoryStore()
+        ? mock.mockFindUserById(result.record.userId)
+        : await findUserById(result.record.userId);
+      if (!user?.passwordHash || String(user.status).toLowerCase() !== "active") {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Account is not active",
+        });
+      }
+      if (!(await isClientWorkspaceUser(user))) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "This portal is for client workspaces.",
+        });
+      }
+
+      const healed = useMemoryStore() ? user : await healPortalUser(user);
+      await assertActiveSubscription(healed);
+      if (!useMemoryStore()) await updateLastSignIn(user.id);
+      else mock.mockUpdateLastSignIn(user.id);
+
+      const token = await createSessionForUser(user.id, ctx.req.headers, ctx.resHeaders);
+      return { user: await toSessionUser(healed), token };
     }),
 
   login: publicQuery

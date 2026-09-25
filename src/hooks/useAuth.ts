@@ -104,6 +104,10 @@ export function useAuth(_options?: UseAuthOptions) {
   }, [user, isPending, planEnded]);
 
   const lookupWorkspacesMutation = trpc.auth.lookupWorkspaces.useMutation();
+  const beginClientLoginMutation = trpc.auth.beginClientLogin.useMutation();
+  const sendClientLoginCodeMutation = trpc.auth.sendClientLoginCode.useMutation();
+  const resendClientLoginCodeMutation = trpc.auth.resendClientLoginCode.useMutation();
+  const verifyClientLoginMutation = trpc.auth.verifyClientLogin.useMutation();
 
   const loginMutation = trpc.auth.login.useMutation({
     onSuccess: async (result) => {
@@ -171,6 +175,28 @@ export function useAuth(_options?: UseAuthOptions) {
       return lookupWorkspacesMutation.mutateAsync({ email });
     },
     [lookupWorkspacesMutation],
+  );
+
+  const beginClientLogin = useCallback(
+    (email: string, password: string) => beginClientLoginMutation.mutateAsync({ email, password }),
+    [beginClientLoginMutation],
+  );
+
+  const sendClientLoginCode = useCallback(
+    (ticket: string, organizationId: number) =>
+      sendClientLoginCodeMutation.mutateAsync({ ticket, organizationId }),
+    [sendClientLoginCodeMutation],
+  );
+
+  const resendClientLoginCode = useCallback(
+    (challengeId: string) => resendClientLoginCodeMutation.mutateAsync({ challengeId }),
+    [resendClientLoginCodeMutation],
+  );
+
+  const verifyClientLogin = useCallback(
+    (challengeId: string, code: string) =>
+      verifyClientLoginMutation.mutateAsync({ challengeId, code }),
+    [verifyClientLoginMutation],
   );
 
   const login = useCallback(
@@ -317,6 +343,10 @@ export function useAuth(_options?: UseAuthOptions) {
       isLoading: !authResolved || logoutMutation.isPending,
       isLoggingIn: loginMutation.isPending,
       isLookingUpWorkspaces: lookupWorkspacesMutation.isPending,
+      isBeginningClientLogin: beginClientLoginMutation.isPending,
+      isSendingClientCode:
+        sendClientLoginCodeMutation.isPending || resendClientLoginCodeMutation.isPending,
+      isVerifyingClientLogin: verifyClientLoginMutation.isPending,
       isRegistering:
         registerAdminMutation.isPending ||
         registerClientMutation.isPending ||
@@ -327,6 +357,10 @@ export function useAuth(_options?: UseAuthOptions) {
       error,
       login,
       lookupWorkspaces,
+      beginClientLogin,
+      sendClientLoginCode,
+      resendClientLoginCode,
+      verifyClientLogin,
       registerAdmin,
       registerClient,
       registerFinance,
@@ -341,6 +375,10 @@ export function useAuth(_options?: UseAuthOptions) {
       logoutMutation.isPending,
       loginMutation.isPending,
       lookupWorkspacesMutation.isPending,
+      beginClientLoginMutation.isPending,
+      sendClientLoginCodeMutation.isPending,
+      resendClientLoginCodeMutation.isPending,
+      verifyClientLoginMutation.isPending,
       registerAdminMutation.isPending,
       registerClientMutation.isPending,
       registerFinanceMutation.isPending,
@@ -350,6 +388,10 @@ export function useAuth(_options?: UseAuthOptions) {
       error,
       login,
       lookupWorkspaces,
+      beginClientLogin,
+      sendClientLoginCode,
+      resendClientLoginCode,
+      verifyClientLogin,
       registerAdmin,
       registerClient,
       registerFinance,

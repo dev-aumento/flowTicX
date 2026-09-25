@@ -1,7 +1,18 @@
 import { TRPCClientError } from "@trpc/client";
 import { useState } from "react";
 import { Link } from "react-router";
-import { ArrowLeft, ArrowRight, Loader2, Lock, Mail, ShieldCheck } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  ChevronRight,
+  Info,
+  Loader2,
+  Lock,
+  Mail,
+  ShieldCheck,
+  UserRound,
+  Users,
+} from "lucide-react";
 import { LoginShowcase } from "@/components/auth/LoginShowcase";
 import { BrandLogo } from "@/components/brand/BrandLogo";
 import { Input } from "@/components/ui/input";
@@ -346,16 +357,6 @@ export default function Login() {
                   {socialNotice ? (
                     <p className="text-center text-xs leading-relaxed text-gray-500">{socialNotice}</p>
                   ) : null}
-                  <p className="pt-1 text-center text-sm text-gray-600">
-                    New to AASO?{" "}
-                    <button
-                      type="button"
-                      onClick={() => switchMode("admin")}
-                      className="font-semibold text-[#2563EB] hover:text-[#1D4ED8]"
-                    >
-                      Create your workspace
-                    </button>
-                  </p>
                 </form>
               ) : null}
 
@@ -629,6 +630,13 @@ export default function Login() {
                 </form>
               ) : null}
             </div>
+
+            {mode === "login" && step === "email" ? (
+              <OtherUserPaths
+                onCreateWorkspace={() => switchMode("admin")}
+                onForgotPassword={() => switchMode("forgot")}
+              />
+            ) : null}
           </div>
         </div>
 
@@ -648,6 +656,107 @@ export default function Login() {
         </footer>
       </div>
     </div>
+  );
+}
+
+function OtherUserPaths({
+  onCreateWorkspace,
+  onForgotPassword,
+}: {
+  onCreateWorkspace: () => void;
+  onForgotPassword: () => void;
+}) {
+  return (
+    <div className="mt-5">
+      <p className="mb-3 text-sm font-semibold text-[#111827]">Other User Paths</p>
+      <div className="space-y-2.5">
+        <PathRow
+          icon={Users}
+          iconClassName="bg-[#D1FAE5] text-[#10B981]"
+          eyebrow="New to AASO?"
+          title="Create your workspace"
+          description="Set up your company and invite your team."
+          onClick={onCreateWorkspace}
+        />
+        <PathRow
+          icon={UserRound}
+          iconClassName="bg-[#EDE9FE] text-[#7C3AED]"
+          eyebrow="Client Portal"
+          title="Access as a client"
+          description="View projects, approvals, invoices and more."
+          to="/client/login"
+        />
+        <PathRow
+          icon={Lock}
+          iconClassName="bg-[#FFE4E6] text-[#F43F5E]"
+          eyebrow="Forgot Password?"
+          title="Reset your password securely."
+          titleClassName="font-medium text-gray-500"
+          onClick={onForgotPassword}
+        />
+      </div>
+      <div className="mt-3 flex items-start gap-3 rounded-2xl bg-[#EFF6FF] px-3.5 py-3">
+        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#DBEAFE] text-[#2563EB]">
+          <Info size={16} />
+        </span>
+        <p className="min-w-0 pt-0.5 text-sm leading-snug text-[#1E3A8A]">
+          <span className="font-semibold">One platform. Multiple experiences.</span>
+          <span className="mt-0.5 block font-normal text-[#3B82F6]">
+            AASO automatically detects your role and provides the right experience.
+          </span>
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function PathRow({
+  icon: Icon,
+  iconClassName,
+  eyebrow,
+  title,
+  description,
+  titleClassName,
+  onClick,
+  to,
+}: {
+  icon: typeof Users;
+  iconClassName: string;
+  eyebrow: string;
+  title: string;
+  description?: string;
+  titleClassName?: string;
+  onClick?: () => void;
+  to?: string;
+}) {
+  const className =
+    "flex w-full items-center gap-3 rounded-2xl bg-white px-3.5 py-3 text-left shadow-[0_8px_24px_rgba(15,23,42,0.05)] transition-colors hover:bg-[#F8FAFC]";
+  const content = (
+    <>
+      <span className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-full", iconClassName)}>
+        <Icon size={18} />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-xs text-gray-500">{eyebrow}</span>
+        <span className={cn("block text-sm font-semibold text-[#2563EB]", titleClassName)}>{title}</span>
+        {description ? <span className="mt-0.5 block text-xs text-gray-500">{description}</span> : null}
+      </span>
+      <ChevronRight size={18} className="shrink-0 text-gray-300" />
+    </>
+  );
+
+  if (to) {
+    return (
+      <Link to={to} className={className}>
+        {content}
+      </Link>
+    );
+  }
+
+  return (
+    <button type="button" onClick={onClick} className={className}>
+      {content}
+    </button>
   );
 }
 
