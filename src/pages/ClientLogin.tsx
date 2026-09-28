@@ -1,6 +1,7 @@
 import { TRPCClientError } from "@trpc/client";
 import { useState } from "react";
 import {
+  ArrowLeft,
   Building2,
   ChevronRight,
   FileText,
@@ -66,12 +67,24 @@ export default function ClientLogin() {
   const [helpNote, setHelpNote] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [forgotFrom, setForgotFrom] = useState<"credentials" | "workspaces">("credentials");
 
   const selectedWorkspace = workspaces[selectedIndex] ?? null;
 
   function resetNotices() {
     setError(null);
     setSuccess(null);
+  }
+
+  function goToPrevious() {
+    resetNotices();
+    setPassword("");
+    setConfirmPassword("");
+    if (step === "forgot") {
+      setStep(forgotFrom);
+      return;
+    }
+    setStep("credentials");
   }
 
   async function handleCredentials(event: React.FormEvent) {
@@ -194,6 +207,16 @@ export default function ClientLogin() {
 
       <div className="flex min-h-dvh items-center justify-center px-4 py-10 sm:px-8">
         <div className="w-full max-w-[440px] rounded-[28px] bg-white px-6 py-8 shadow-[0_16px_50px_rgba(15,23,42,0.08)] sm:px-9 sm:py-10">
+          {step !== "credentials" ? (
+            <button
+              type="button"
+              onClick={goToPrevious}
+              className="mb-4 inline-flex items-center gap-1.5 text-sm font-medium text-[#2563EB] hover:text-[#1D4ED8]"
+            >
+              <ArrowLeft size={16} />
+              Previous
+            </button>
+          ) : null}
           {step === "credentials" ? (
             <form onSubmit={handleCredentials} className="space-y-4">
               <div className="mb-2 text-center">
@@ -228,6 +251,7 @@ export default function ClientLogin() {
                   type="button"
                   onClick={() => {
                     resetNotices();
+                    setForgotFrom("credentials");
                     setStep("forgot");
                   }}
                   className="text-sm font-medium text-[#22C55E] hover:text-[#16A34A]"
@@ -331,6 +355,7 @@ export default function ClientLogin() {
                   type="button"
                   onClick={() => {
                     resetNotices();
+                    setForgotFrom("workspaces");
                     setStep("forgot");
                   }}
                   className="text-sm font-medium text-[#22C55E] hover:text-[#16A34A]"
@@ -352,17 +377,6 @@ export default function ClientLogin() {
                 ) : (
                   "Sign in"
                 )}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  resetNotices();
-                  setPassword("");
-                  setStep("credentials");
-                }}
-                className="w-full text-sm font-medium text-[#2563EB]"
-              >
-                Use a different email
               </button>
             </form>
           ) : null}
@@ -414,16 +428,6 @@ export default function ClientLogin() {
                 label="Update password"
                 busyLabel="Updating password..."
               />
-              <button
-                type="button"
-                onClick={() => {
-                  resetNotices();
-                  setStep("credentials");
-                }}
-                className="w-full text-sm text-gray-500"
-              >
-                Back to sign in
-              </button>
             </form>
           ) : null}
 

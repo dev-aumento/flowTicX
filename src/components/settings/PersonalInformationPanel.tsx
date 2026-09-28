@@ -203,12 +203,15 @@ type PersonalInformationPanelProps = {
   userId?: number;
   onSaved?: () => void;
   onError?: (message: string) => void;
+  /** Wider employee dialog: more columns, documents beside the fields. */
+  wide?: boolean;
 };
 
 export function PersonalInformationPanel({
   userId,
   onSaved,
   onError,
+  wide = false,
 }: PersonalInformationPanelProps) {
   const { user } = useAuth();
   const utils = trpc.useUtils();
@@ -217,6 +220,13 @@ export function PersonalInformationPanel({
   const [form, setForm] = useState<PersonalForm>(EMPTY_FORM);
 
   const isSelf = userId == null || userId === user?.id;
+  const fieldGrid = wide
+    ? "rounded-xl border border-gray-200 bg-white px-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-6"
+    : "rounded-xl border border-gray-200 bg-white px-4 grid grid-cols-1 md:grid-cols-2 gap-x-4";
+  const formGrid = wide
+    ? "rounded-xl border border-gray-200 bg-white p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
+    : "rounded-xl border border-gray-200 bg-white p-4 grid grid-cols-1 md:grid-cols-2 gap-4";
+  const spanAll = wide ? "sm:col-span-2 lg:col-span-4" : "md:col-span-2";
   const compact = isClientPortalUser(user);
   const canManageHeadOfDepartment = hasPermission(user, "profile.head_of_department");
   const canEditEmploymentType = hasPermission(user, "employees.manage");
@@ -426,6 +436,13 @@ export function PersonalInformationPanel({
         )}
       </div>
 
+      <div
+        className={
+          wide && !compact
+            ? "lg:grid lg:grid-cols-[minmax(0,1fr)_18rem] lg:items-start lg:gap-4"
+            : undefined
+        }
+      >
       {compact ? (
         !editing ? (
           <div className="rounded-xl border border-gray-200 bg-white px-4 grid grid-cols-1 md:grid-cols-2 gap-x-4">
@@ -490,7 +507,7 @@ export function PersonalInformationPanel({
           </div>
         )
       ) : !editing ? (
-        <div className="rounded-xl border border-gray-200 bg-white px-4 grid grid-cols-1 md:grid-cols-2 gap-x-4">
+        <div className={fieldGrid}>
           <FieldRow label="First name" value={data.firstName} className="border-b border-gray-100" />
           <FieldRow label="Last name" value={data.lastName} className="border-b border-gray-100" />
           <FieldRow
@@ -579,7 +596,7 @@ export function PersonalInformationPanel({
             <FieldRow
               label="Head of department"
               value={headNames}
-              className={`md:col-span-2${isSelf ? " border-b border-gray-100" : ""}`}
+              className={`${spanAll}${isSelf ? " border-b border-gray-100" : ""}`}
             />
           ) : null}
           {isSelf ? (
@@ -592,12 +609,12 @@ export function PersonalInformationPanel({
                   "—"
                 )
               }
-              className="md:col-span-2"
+              className={spanAll}
             />
           ) : null}
         </div>
       ) : (
-        <div className="rounded-xl border border-gray-200 bg-white p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className={formGrid}>
           <FormField label="First name">
             <input
               type="text"
@@ -706,7 +723,7 @@ export function PersonalInformationPanel({
             )}
           </FormField>
           {canEditNoticePeriod ? (
-            <div className="md:col-span-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-3">
+            <div className={`${spanAll} rounded-lg border border-gray-200 bg-gray-50 px-3 py-3`}>
               <label className="flex items-start gap-3 cursor-pointer">
                 <Checkbox
                   checked={form.onNoticePeriod}
@@ -826,7 +843,7 @@ export function PersonalInformationPanel({
             />
           </FormField>
           {canManageHeadOfDepartment ? (
-            <div className="md:col-span-2">
+            <div className={spanAll}>
               <FormField label="Head of department">
                 <select
                   value=""
@@ -873,7 +890,7 @@ export function PersonalInformationPanel({
             </div>
           ) : null}
           {isSelf ? (
-            <div className="md:col-span-2">
+            <div className={spanAll}>
               <FormField label="Notes">
                 <textarea
                   value={form.privateNotes}
@@ -891,7 +908,6 @@ export function PersonalInformationPanel({
           ) : null}
         </div>
       )}
-
       {!compact ? (
         <PersonalDocumentsSection
           targetUserId={isSelf ? undefined : userId}
@@ -899,6 +915,8 @@ export function PersonalInformationPanel({
           onError={onError}
         />
       ) : null}
+      </div>
+
     </motion.div>
   );
 }

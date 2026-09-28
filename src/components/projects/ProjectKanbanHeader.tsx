@@ -63,7 +63,7 @@ export function ProjectKanbanHeader({
         </Link>
         <div className="min-w-0 flex-1 overflow-hidden">
           <div className="flex items-center gap-2 min-w-0">
-            <h1 className="min-w-0 flex-1 text-xl sm:text-[22px] font-bold text-[#111827] dark:text-white leading-tight truncate">
+            <h1 className="min-w-0 text-xl sm:text-[22px] font-bold text-[#111827] dark:text-white leading-tight truncate">
               {name}
             </h1>
             {agency ? (

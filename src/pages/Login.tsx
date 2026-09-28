@@ -95,6 +95,7 @@ export default function Login() {
   const [googleBusy, setGoogleBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [forgotFrom, setForgotFrom] = useState<"email" | "password">("email");
 
   const selectedWorkspace = workspaces[selectedIndex] ?? null;
   const trackerStep: 1 | 2 | 3 = step === "email" ? 1 : step === "password" ? 3 : 2;
@@ -122,6 +123,22 @@ export default function Login() {
     setPortalHint(null);
     setInactiveAccount(false);
     resetNotices();
+  }
+
+  function goToPrevious() {
+    resetNotices();
+    setPassword("");
+    setConfirmPassword("");
+    if (mode === "forgot") {
+      setMode("login");
+      setStep(forgotFrom);
+      return;
+    }
+    if (step === "password") {
+      setStep("workspaces");
+      return;
+    }
+    backToEmail();
   }
 
   async function continueWithEmail(rawEmail: string) {
@@ -325,6 +342,16 @@ export default function Login() {
             {mode === "login" ? <StepTracker step={trackerStep} /> : null}
 
             <div className="rounded-[28px] bg-white px-5 py-7 shadow-[0_18px_60px_rgba(15,23,42,0.08)] sm:px-8 sm:py-9">
+              {mode === "forgot" || (mode === "login" && step !== "email") ? (
+                <button
+                  type="button"
+                  onClick={goToPrevious}
+                  className="mb-4 inline-flex items-center gap-1.5 text-sm font-medium text-[#2563EB] hover:text-[#1D4ED8]"
+                >
+                  <ArrowLeft size={16} />
+                  Previous
+                </button>
+              ) : null}
               <div className="mb-6 text-center">
                 {step === "password" && mode === "login" && selectedWorkspace ? (
                   <WorkspaceHeading
@@ -332,7 +359,7 @@ export default function Login() {
                     onNotYou={() => {
                       resetNotices();
                       setPassword("");
-                      setStep(workspaces.length > 1 ? "workspaces" : "email");
+                      setStep("workspaces");
                     }}
                   />
                 ) : (
@@ -418,9 +445,6 @@ export default function Login() {
                   </div>
                   {error ? <p className="text-sm text-red-500">{error}</p> : null}
                   <PrimaryButton busy={false} label="Continue" busyLabel="Continue" arrow />
-                  <TextAction icon={ArrowLeft} onClick={backToEmail}>
-                    Use a different email
-                  </TextAction>
                   <InfoNote
                     icon={ShieldCheck}
                     tone="blue"
@@ -446,7 +470,10 @@ export default function Login() {
                   <div className="flex justify-end">
                     <button
                       type="button"
-                      onClick={() => switchMode("forgot")}
+                      onClick={() => {
+                        setForgotFrom("password");
+                        switchMode("forgot");
+                      }}
                       className="text-sm font-medium text-[#2563EB] hover:text-[#1D4ED8]"
                     >
                       Forgot password?
@@ -454,16 +481,6 @@ export default function Login() {
                   </div>
                   {error ? <p className="text-sm text-red-500">{error}</p> : null}
                   <PrimaryButton busy={isLoggingIn} label="Sign in" busyLabel="Signing in..." />
-                  <TextAction
-                    icon={ArrowLeft}
-                    onClick={() => {
-                      resetNotices();
-                      setPassword("");
-                      setStep("email");
-                    }}
-                  >
-                    Use a different account
-                  </TextAction>
                   <InfoNote
                     icon={Lock}
                     tone="green"
@@ -493,9 +510,6 @@ export default function Login() {
                       <ArrowRight size={16} />
                     </button>
                   )}
-                  <TextAction icon={ArrowLeft} onClick={backToEmail}>
-                    Use a different email
-                  </TextAction>
                   <InfoNote
                     icon={ShieldCheck}
                     tone="blue"
@@ -551,18 +565,6 @@ export default function Login() {
                     label="Update password"
                     busyLabel="Updating password..."
                   />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      resetNotices();
-                      setPassword("");
-                      setConfirmPassword("");
-                      setMode("login");
-                    }}
-                    className="w-full text-sm text-gray-500 hover:text-gray-800"
-                  >
-                    Back to sign in
-                  </button>
                 </form>
               ) : null}
 
@@ -653,7 +655,10 @@ export default function Login() {
             {mode === "login" && step === "email" ? (
               <OtherUserPaths
                 onCreateWorkspace={() => switchMode("admin")}
-                onForgotPassword={() => switchMode("forgot")}
+                onForgotPassword={() => {
+                  setForgotFrom("email");
+                  switchMode("forgot");
+                }}
               />
             ) : null}
           </div>
@@ -927,27 +932,6 @@ function GoogleIcon() {
         d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.962L3.964 7.294C4.672 5.163 6.656 3.58 9 3.58z"
       />
     </svg>
-  );
-}
-
-function TextAction({
-  icon: Icon,
-  onClick,
-  children,
-}: {
-  icon: typeof ArrowLeft;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="flex w-full items-center justify-center gap-1.5 text-sm font-medium text-[#2563EB] hover:text-[#1D4ED8]"
-    >
-      <Icon size={15} />
-      {children}
-    </button>
   );
 }
 

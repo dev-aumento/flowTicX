@@ -956,7 +956,7 @@ function LeaveRequestDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl lg:max-h-[calc(100vh-2rem)]">
         <DialogHeader>
           <DialogTitle>Leave request details</DialogTitle>
           <DialogDescription>
@@ -975,7 +975,7 @@ function LeaveRequestDetailDialog({
           </div>
 
           {editing ? (
-            <div className="space-y-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-x-8">
               <div>
                 <label className="block text-xs text-gray-400 mb-1.5">Leave type</label>
                 <div className="flex flex-wrap gap-2">
@@ -1044,7 +1044,7 @@ function LeaveRequestDetailDialog({
                 </p>
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-2 sm:col-span-2">
                 <div>
                   <label className="block text-xs text-gray-400 mb-1">Start date</label>
                   <input
@@ -1073,7 +1073,7 @@ function LeaveRequestDetailDialog({
                 </div>
               </div>
 
-              <div className="text-xs text-gray-500">
+              <div className="text-xs text-gray-500 sm:col-span-2">
                 Duration:{" "}
                 <span className="font-medium text-gray-700">
                   {previewDays > 0 ? formatLeaveDays(previewDays) : "—"}
@@ -1081,7 +1081,7 @@ function LeaveRequestDetailDialog({
                 {previewDays > 1 ? " · weekdays only" : null}
               </div>
 
-              <div>
+              <div className="sm:col-span-2">
                 <label className="block text-xs text-gray-400 mb-1">Reason</label>
                 <textarea
                   value={reason}
@@ -1092,18 +1092,18 @@ function LeaveRequestDetailDialog({
               </div>
 
               {request.status === "approved" ? (
-                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 sm:col-span-2">
                   Saving will re-submit this request as pending for HR review.
                 </p>
               ) : null}
 
               {editError ? (
-                <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+                <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2 sm:col-span-2">
                   {editError}
                 </p>
               ) : null}
 
-              <div className="flex items-center gap-2 pt-1">
+              <div className="flex items-center gap-2 pt-1 sm:col-span-2">
                 <button
                   type="button"
                   disabled={updateMutation.isPending}
@@ -1151,6 +1151,7 @@ function LeaveRequestDetailDialog({
             </div>
           ) : (
             <>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8">
               <DetailRow
                 label="Leave type"
                 value={leaveTypeLabel(request.leaveType as LeaveType, {
@@ -1187,6 +1188,7 @@ function LeaveRequestDetailDialog({
                   value={formatWorkZoneDateTime(request.reviewedAt)}
                 />
               ) : null}
+              </div>
 
               {(canEdit || canCancel) && (
                 <div className="pt-2 border-t border-gray-100 space-y-2">

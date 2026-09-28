@@ -103,7 +103,7 @@ export function EmployeeDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-6xl lg:max-h-[calc(100vh-2rem)]">
         <DialogHeader>
           <DialogTitle>Employee details</DialogTitle>
           <DialogDescription>
@@ -209,6 +209,7 @@ export function EmployeeDetailDialog({
 
             <PersonalInformationPanel
               userId={userId!}
+              wide
               onError={setSaveError}
               onSaved={() => {
                 if (userId != null) {

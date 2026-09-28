@@ -2547,7 +2547,7 @@ function LeaveRequestDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl lg:max-h-[calc(100vh-2rem)]">
         <DialogHeader>
           <DialogTitle>Leave request details</DialogTitle>
           <DialogDescription>
@@ -2584,68 +2584,73 @@ function LeaveRequestDetailDialog({
             <StatusBadge status={request.status} />
           </div>
 
-          <DetailRow
-            label="Leave type"
-            value={leaveTypeLabel(request.leaveType as LeaveType, {
-              isHalfDay: request.isHalfDay,
-              days: request.days,
-            })}
-          />
-          <DetailRow label="Dates" value={dateLabel} />
-          <DetailRow
-            label="Duration"
-            value={formatLeaveDays(request.days)}
-          />
-          <DetailRow label="Applied on" value={formatWorkZoneDateTime(request.createdAt)} />
-
-          {request.status !== "pending" && request.reviewedAt ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8">
             <DetailRow
-              label={
-                request.status === "approved"
-                  ? "Approved on"
-                  : request.status === "rejected"
-                    ? "Rejected on"
-                    : request.status === "cancelled"
-                      ? "Cancelled on"
-                      : "Reviewed on"
-              }
-              value={formatWorkZoneDateTime(request.reviewedAt)}
+              label="Leave type"
+              value={leaveTypeLabel(request.leaveType as LeaveType, {
+                isHalfDay: request.isHalfDay,
+                days: request.days,
+              })}
             />
-          ) : null}
+            <DetailRow label="Dates" value={dateLabel} />
+            <DetailRow
+              label="Duration"
+              value={formatLeaveDays(request.days)}
+            />
+            <DetailRow label="Applied on" value={formatWorkZoneDateTime(request.createdAt)} />
 
-          {!isWfh ? (
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Reason</label>
-              <textarea
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                rows={3}
-                disabled={reviewing || savingDetails}
-                placeholder="Reason for leave…"
-                className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 focus:border-[#2563EB] disabled:opacity-60"
+            {request.status !== "pending" && request.reviewedAt ? (
+              <DetailRow
+                label={
+                  request.status === "approved"
+                    ? "Approved on"
+                    : request.status === "rejected"
+                      ? "Rejected on"
+                      : request.status === "cancelled"
+                        ? "Cancelled on"
+                        : "Reviewed on"
+                }
+                value={formatWorkZoneDateTime(request.reviewedAt)}
               />
-              {!reasonValid ? (
-                <p className="text-[11px] text-red-500 mt-1">
-                  Reason must be at least 3 characters.
-                </p>
-              ) : null}
-            </div>
-          ) : null}
+            ) : null}
+          </div>
 
-          <div className="pt-2 border-t border-gray-100 space-y-3">
-            <div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {!isWfh ? (
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Reason</label>
+                <textarea
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  rows={3}
+                  disabled={reviewing || savingDetails}
+                  placeholder="Reason for leave…"
+                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 focus:border-[#2563EB] disabled:opacity-60"
+                />
+                {!reasonValid ? (
+                  <p className="text-[11px] text-red-500 mt-1">
+                    Reason must be at least 3 characters.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+
+            <div className={isWfh ? "sm:col-span-2" : undefined}>
               <label className="block text-xs text-gray-400 mb-1">
                 Note (optional)
               </label>
               <textarea
                 value={reviewNote}
                 onChange={(e) => setReviewNote(e.target.value)}
-                rows={2}
+                rows={3}
                 disabled={reviewing || savingDetails}
                 placeholder="Add or update a note for the employee…"
                 className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 focus:border-[#2563EB] disabled:opacity-60"
               />
             </div>
+          </div>
+
+          <div className="pt-2 border-t border-gray-100 space-y-3">
 
             <button
               type="button"
@@ -2663,7 +2668,7 @@ function LeaveRequestDetailDialog({
             </button>
 
             <p className="text-xs text-gray-500">Update leave status</p>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               {statusActions.map((action) => {
                 const isCurrent = request.status === action.status;
                 const isThisPending =
