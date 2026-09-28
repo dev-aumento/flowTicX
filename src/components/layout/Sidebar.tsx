@@ -4,7 +4,7 @@ import { ClientSidebarPanel } from "./ClientSidebar";
 import { useAuth } from "@/hooks/useAuth";
 import { isClientPortalUser } from "@/lib/client-portal";
 import { useTaskChatBadgeCount } from "@/hooks/useTaskChats";
-import { canAccessRoute } from "@/lib/permissions";
+import { canAccessRoute, getDefaultHomePath } from "@/lib/permissions";
 import { canManageLeaves, isAdminOrManagement, isFinanceRoleOnly } from "@/lib/leave-policy";
 import { requestDashboardRefresh } from "@/lib/dashboard-refresh";
 import {
@@ -399,19 +399,26 @@ function SidebarPanel({
           collapsed ? "justify-center px-2" : "gap-3 px-4"
         }`}
       >
-        {collapsed ? (
-          <img
-            src="/aaso-favicon.png"
-            alt="Aaso"
-            className="h-8 w-8 object-contain flex-shrink-0"
-          />
-        ) : (
-          <img
-            src="/aaso-logo.png"
-            alt="Aaso"
-            className="h-8 w-auto max-w-[160px] object-contain object-left flex-shrink-0"
-          />
-        )}
+        <button
+          type="button"
+          onClick={() => handleNav(getDefaultHomePath(user))}
+          className="flex min-w-0 cursor-pointer items-center rounded-md"
+          aria-label="Go to dashboard"
+        >
+          {collapsed ? (
+            <img
+              src="/aaso-favicon.png"
+              alt=""
+              className="h-8 w-8 object-contain flex-shrink-0"
+            />
+          ) : (
+            <img
+              src="/aaso-logo.png"
+              alt=""
+              className="h-8 w-auto max-w-[160px] object-contain object-left flex-shrink-0"
+            />
+          )}
+        </button>
         {showCollapseToggle ? (
           <button
             type="button"

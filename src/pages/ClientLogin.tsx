@@ -17,7 +17,7 @@ import {
   ShieldCheck,
   Users,
 } from "lucide-react";
-import { BrandLogo } from "@/components/brand/BrandLogo";
+import { AASO_SITE_URL, BrandLogo } from "@/components/brand/BrandLogo";
 import { Input } from "@/components/ui/input";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import { PasswordInput } from "@/components/ui/password-input";
@@ -634,7 +634,7 @@ function ClientBrandPanel() {
       <div className="pointer-events-none absolute -right-16 top-10 h-56 w-56 rounded-full border border-white/10" />
 
       <div className="relative z-10 flex items-center gap-3">
-        <BrandLogo variant="dark" imgClassName="h-8" />
+        <BrandLogo variant="dark" imgClassName="h-8" href={AASO_SITE_URL} />
         <span className="rounded-full border border-[#3DDC97] px-2.5 py-1 text-[11px] font-medium text-[#3DDC97]">
           Client Portal
         </span>

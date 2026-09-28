@@ -240,15 +240,51 @@ html.dark .text-slate-800 {
 
 html.dark .text-gray-600,
 html.dark .text-gray-500,
-html.dark .text-slate-600,
-html.dark .text-slate-500 {
-  color: var(--dm-text-muted) !important;
-}
-
 html.dark .text-gray-400,
 html.dark .text-gray-300,
-html.dark .text-slate-400 {
-  color: var(--dm-text-soft) !important;
+html.dark .text-slate-600,
+html.dark .text-slate-500,
+html.dark .text-slate-400,
+html.dark .text-muted-foreground,
+html.dark .text-\[\#6B7280\],
+html.dark .text-\[\#6D6E6F\],
+html.dark .text-\[\#9CA3AF\],
+html.dark .text-\[\#4B5563\] {
+  color: var(--dm-text) !important;
+}
+
+html.dark .dark\:text-gray-300,
+html.dark .dark\:text-gray-400,
+html.dark .dark\:text-gray-500,
+html.dark .dark\:text-slate-300,
+html.dark .dark\:text-slate-400,
+html.dark .dark\:text-\[\#A2A0A0\],
+html.dark .dark\:text-\[\#C8C7C5\],
+html.dark .dark\:text-\[\#D0CFCD\] {
+  color: var(--dm-text);
+}
+
+/*
+ * Light theme: gray copy uses the same black as primary text.
+ * :where() keeps this at utility specificity so hover and focus colors still win.
+ */
+:where(html:not(.dark)) :is(
+  .text-gray-300,
+  .text-gray-400,
+  .text-gray-500,
+  .text-gray-600,
+  .text-gray-700,
+  .text-slate-400,
+  .text-slate-500,
+  .text-slate-600,
+  .text-slate-700,
+  .text-muted-foreground,
+  .text-\[\#6B7280\],
+  .text-\[\#6D6E6F\],
+  .text-\[\#9CA3AF\],
+  .text-\[\#4B5563\]
+) {
+  color: #111827;
 }
 
 html.dark .text-blue-800,
@@ -376,8 +412,8 @@ html.dark textarea::placeholder {
 /* Light mode: translucent slate gradient composited over white */
 .sidebar-chrome,
 .portal-slate-gradient {
-  background-color: #677d93e5;
-  background-image: linear-gradient(to bottom,#677d937f,#677d93e5);
+  background-color: #242629e5;
+  /* background-image: linear-gradient(to bottom,#677d937f,#677d93e5); */
 }
 
 /* Dark mode: previous charcoal sidebar (no light-mode gradient) */
@@ -540,7 +576,7 @@ html.native-app .native-feed-content h1 {
 }
 html.native-app .native-feed-content .text-gray-500,
 html.native-app .native-feed-content .text-gray-600 {
-  color: rgba(255, 255, 255, 0.55) !important;
+  color: #f5f5f5 !important;
 }
 html.native-app .native-feed-content .bg-white {
   background-color: #1a1a1a !important;
@@ -549,5 +585,30 @@ html.native-app .native-feed-content .bg-white {
 }
 html.native-app .native-feed-content .text-\[\#1F2937\] {
   color: #f5f5f5 !important;
+}
+
+@keyframes login-step-pop {
+  0% {
+    transform: scale(0.82);
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.35);
+  }
+  55% {
+    transform: scale(1.08);
+    box-shadow: 0 0 0 7px rgba(37, 99, 235, 0);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.18);
+  }
+}
+
+.login-step-active {
+  animation: login-step-pop 0.48s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-step-active {
+    animation: none;
+  }
 }
 

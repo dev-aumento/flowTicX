@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Workspace } from "@contracts/constants";
-import { BrandLogo } from "@/components/brand/BrandLogo";
+import { AASO_SITE_URL, BrandLogo } from "@/components/brand/BrandLogo";
 
 type OrgAuthShellProps = {
   children: ReactNode;
@@ -34,7 +34,7 @@ export function OrgAuthShell({ children, organizationLabel }: OrgAuthShellProps)
         <div className="absolute bottom-0 left-0 right-0 h-1/3 bg-gradient-to-t from-[#060f1a] to-transparent" />
 
         <div className="relative z-10">
-          <BrandLogo variant="dark" imgClassName="h-10" />
+          <BrandLogo variant="dark" imgClassName="h-10" href={AASO_SITE_URL} />
           <p className="mt-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-white/50">
             Powered by <span className="text-[#38BDF8]">Aumento Infoway</span>
           </p>
@@ -57,14 +57,14 @@ export function OrgAuthShell({ children, organizationLabel }: OrgAuthShellProps)
       {/* Form panel */}
       <div className="flex-1 flex flex-col min-h-screen bg-[#e8ecf1]">
         <div className="lg:hidden flex items-center px-6 py-4 bg-[#0b1a2e] text-white">
-          <BrandLogo variant="dark" imgClassName="h-8" />
+          <BrandLogo variant="dark" imgClassName="h-8" href={AASO_SITE_URL} />
         </div>
 
         <div className="flex-1 flex items-center justify-center p-6 sm:p-10">
           <div className="w-full max-w-[420px] bg-white rounded-2xl shadow-[0_8px_40px_rgba(15,23,42,0.12)] px-8 py-10 sm:px-10 sm:py-12">
             <div className="text-center mb-8">
               <div className="mb-5 flex justify-center">
-                <BrandLogo variant="light" imgClassName="h-9" />
+                <BrandLogo variant="light" imgClassName="h-9" href={AASO_SITE_URL} />
               </div>
               {orgDisplay.trim() && orgDisplay.trim() !== Workspace.name ? (
                 <>

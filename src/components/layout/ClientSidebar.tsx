@@ -154,14 +154,19 @@ export function ClientSidebarPanel({
         )}
       >
         {collapsed ? (
-          <span className="h-8 w-8 rounded-lg bg-[#F06A6A] text-white text-xs font-bold flex items-center justify-center">
+          <button
+            type="button"
+            onClick={() => handleNav("/")}
+            className="h-8 w-8 cursor-pointer rounded-lg bg-[#F06A6A] text-white text-xs font-bold flex items-center justify-center"
+            aria-label="Go to dashboard"
+          >
             {workspaceName.slice(0, 1).toUpperCase()}
-          </span>
+          </button>
         ) : (
           <button
             type="button"
             onClick={() => handleNav("/")}
-            className="flex items-center gap-2 min-w-0 rounded-lg px-1.5 py-1.5 text-[#1E1F21] hover:bg-[#EDEAE6] dark:text-[#F5F4F3] dark:hover:bg-[#2E2F32] dark:hover:text-[#F5F4F3]"
+            className="flex min-w-0 cursor-pointer items-center gap-2 rounded-lg px-1.5 py-1.5 text-[#1E1F21] hover:bg-[#EDEAE6] dark:text-[#F5F4F3] dark:hover:bg-[#2E2F32] dark:hover:text-[#F5F4F3]"
           >
             <span className="h-7 w-7 rounded-lg bg-[#F06A6A] text-white text-xs font-bold flex items-center justify-center shrink-0">
               {workspaceName.slice(0, 1).toUpperCase()}

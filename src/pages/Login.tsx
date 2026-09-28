@@ -1,5 +1,5 @@
 import { TRPCClientError } from "@trpc/client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import {
   ArrowLeft,
@@ -14,11 +14,12 @@ import {
   Users,
 } from "lucide-react";
 import { LoginShowcase } from "@/components/auth/LoginShowcase";
-import { BrandLogo } from "@/components/brand/BrandLogo";
+import { AASO_SITE_URL, BrandLogo } from "@/components/brand/BrandLogo";
 import { Input } from "@/components/ui/input";
 import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/useAuth";
+import { preloadGoogleSignIn, startGoogleSignIn } from "@/lib/google-sign-in";
 import { displayPlanEndedMessage } from "@/lib/plan-ended";
 import { cn } from "@/lib/utils";
 
@@ -91,11 +92,16 @@ export default function Login() {
   const [portalHint, setPortalHint] = useState<PortalHint | null>(null);
   const [inactiveAccount, setInactiveAccount] = useState(false);
   const [socialNotice, setSocialNotice] = useState<string | null>(null);
+  const [googleBusy, setGoogleBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
   const selectedWorkspace = workspaces[selectedIndex] ?? null;
   const trackerStep: 1 | 2 | 3 = step === "email" ? 1 : step === "password" ? 3 : 2;
+
+  useEffect(() => {
+    void preloadGoogleSignIn().catch(() => undefined);
+  }, []);
 
   function resetNotices() {
     setError(null);
@@ -118,10 +124,9 @@ export default function Login() {
     resetNotices();
   }
 
-  async function handleLookup(event: React.FormEvent) {
-    event.preventDefault();
+  async function continueWithEmail(rawEmail: string) {
     resetNotices();
-    const normalized = email.trim().toLowerCase();
+    const normalized = rawEmail.trim().toLowerCase();
     if (!normalized) {
       setError("Please enter your work email");
       return;
@@ -145,6 +150,27 @@ export default function Login() {
     } catch (err) {
       setError(errorMessage(err, "Unable to look up your workspace. Please try again."));
     }
+  }
+
+  function handleLookup(event: React.FormEvent) {
+    event.preventDefault();
+    void continueWithEmail(email);
+  }
+
+  function handleGoogleSignIn() {
+    setSocialNotice(null);
+    setError(null);
+    setGoogleBusy(true);
+    startGoogleSignIn({
+      onEmail: (googleEmail) => {
+        void continueWithEmail(googleEmail).finally(() => setGoogleBusy(false));
+      },
+      onCancel: () => setGoogleBusy(false),
+      onError: (message) => {
+        setGoogleBusy(false);
+        setError(message);
+      },
+    });
   }
 
   function handleChooseWorkspace(event: React.FormEvent) {
@@ -240,7 +266,7 @@ export default function Login() {
     }
   }
 
-  function showSocialNotice(provider: "Google" | "Microsoft") {
+  function showSocialNotice(provider: "Google") {
     setSocialNotice(
       `${provider} sign-in isn't connected yet. Continue with your work email.`,
     );
@@ -300,9 +326,6 @@ export default function Login() {
 
             <div className="rounded-[28px] bg-white px-5 py-7 shadow-[0_18px_60px_rgba(15,23,42,0.08)] sm:px-8 sm:py-9">
               <div className="mb-6 text-center">
-                <div className="mb-5 flex justify-center">
-                  <BrandLogo variant="light" imgClassName="h-8 w-8" />
-                </div>
                 {step === "password" && mode === "login" && selectedWorkspace ? (
                   <WorkspaceHeading
                     workspace={selectedWorkspace}
@@ -342,16 +365,12 @@ export default function Login() {
                     arrow
                   />
                   <OrDivider />
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid">
                     <SocialButton
                       provider="Google"
                       icon={<GoogleIcon />}
-                      onClick={() => showSocialNotice("Google")}
-                    />
-                    <SocialButton
-                      provider="Microsoft"
-                      icon={<MicrosoftIcon />}
-                      onClick={() => showSocialNotice("Microsoft")}
+                      busy={googleBusy || isLookingUpWorkspaces}
+                      onClick={handleGoogleSignIn}
                     />
                   </div>
                   {socialNotice ? (
@@ -695,17 +714,6 @@ function OtherUserPaths({
           onClick={onForgotPassword}
         />
       </div>
-      <div className="mt-3 flex items-start gap-3 rounded-2xl bg-[#EFF6FF] px-3.5 py-3">
-        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#DBEAFE] text-[#2563EB]">
-          <Info size={16} />
-        </span>
-        <p className="min-w-0 pt-0.5 text-sm leading-snug text-[#1E3A8A]">
-          <span className="font-semibold">One platform. Multiple experiences.</span>
-          <span className="mt-0.5 block font-normal text-[#3B82F6]">
-            AASO automatically detects your role and provides the right experience.
-          </span>
-        </p>
-      </div>
     </div>
   );
 }
@@ -766,36 +774,66 @@ function StepTracker({ step }: { step: 1 | 2 | 3 }) {
     { n: 2 as const, title: "Check Account" },
     { n: 3 as const, title: "Enter Password" },
   ];
+  const [shown, setShown] = useState(step);
+
+  useEffect(() => {
+    if (step === shown) return undefined;
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduceMotion) {
+      setShown(step);
+      return undefined;
+    }
+    const id = window.setTimeout(() => setShown(step), 520);
+    return () => window.clearTimeout(id);
+  }, [step, shown]);
 
   return (
-    <ol className="mb-4 flex items-center justify-center gap-2 sm:gap-3" aria-label="Sign-in steps">
+    <ol
+      className="mb-4 grid w-full grid-cols-[auto_minmax(1rem,1fr)_auto_minmax(1rem,1fr)_auto] items-center"
+      aria-label="Sign-in steps"
+    >
       {items.map((item, index) => {
-        const active = step === item.n;
-        const done = step > item.n;
+        const active = shown === item.n;
+        const done = shown > item.n;
+        const connected = step > item.n;
         return (
-          <li key={item.n} className="flex items-center gap-2">
-            <span
-              className={cn(
-                "grid h-6 w-6 place-items-center rounded-full text-[11px] font-semibold",
-                active
-                  ? "bg-[#2563EB] text-white"
-                  : done
-                    ? "bg-[#DBEAFE] text-[#2563EB]"
-                    : "bg-white text-gray-400 ring-1 ring-gray-200",
-              )}
-            >
-              {item.n}
-            </span>
-            <span
-              className={cn(
-                "hidden text-xs font-medium sm:inline",
-                active ? "text-[#111827]" : "text-gray-400",
-              )}
-            >
-              {item.title}
+          <li key={item.n} className="contents">
+            <span className="flex items-center gap-1.5 sm:gap-2">
+              <span
+                key={active ? `active-${item.n}` : `idle-${item.n}`}
+                className={cn(
+                  "grid h-6 w-6 place-items-center rounded-full text-[11px] font-semibold transition-colors duration-300",
+                  active
+                    ? "login-step-active bg-[#2563EB] text-white shadow-[0_0_0_4px_rgba(37,99,235,0.18)]"
+                    : done
+                      ? "bg-[#DBEAFE] text-[#2563EB]"
+                      : "bg-white text-gray-400 ring-1 ring-gray-200",
+                )}
+                aria-current={active ? "step" : undefined}
+              >
+                {item.n}
+              </span>
+              <span
+                className={cn(
+                  "hidden text-xs font-medium transition-colors duration-300 sm:inline",
+                  active ? "text-[#111827]" : done ? "text-[#1D4ED8]" : "text-gray-400",
+                )}
+              >
+                {item.title}
+              </span>
             </span>
             {index < items.length - 1 ? (
-              <span className="hidden h-px w-5 bg-gray-200 sm:block" aria-hidden />
+              <span
+                className="relative mx-1.5 h-0.5 overflow-hidden rounded-full bg-gray-200 sm:mx-2.5"
+                aria-hidden
+              >
+                <span
+                  className={cn(
+                    "absolute inset-0 origin-left bg-[#2563EB] transition-transform duration-500 ease-out motion-reduce:transition-none",
+                    connected ? "scale-x-100" : "scale-x-0",
+                  )}
+                />
+              </span>
             ) : null}
           </li>
         );
@@ -847,21 +885,23 @@ function SocialButton({
   provider,
   icon,
   onClick,
+  busy = false,
 }: {
   provider: string;
   icon: React.ReactNode;
   onClick: () => void;
+  busy?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="flex h-[58px] items-center justify-center gap-2.5 rounded-xl border border-gray-200 bg-white px-2 transition-colors hover:bg-gray-50"
+      disabled={busy}
+      className="flex h-[40px] items-center justify-center gap-2.5 rounded-xl border border-gray-200 bg-white px-2 transition-colors hover:bg-gray-50 disabled:opacity-60"
     >
       {icon}
-      <span className="text-left leading-tight">
-        <span className="block text-[11px] text-gray-500">Continue with</span>
-        <span className="block text-sm font-semibold text-[#111827]">{provider}</span>
+      <span className="text-left leading-tight flex items-center">
+        <span className="block text-[13px] text-gray-500">Continue with Google</span>
       </span>
     </button>
   );
@@ -886,17 +926,6 @@ function GoogleIcon() {
         fill="#EA4335"
         d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.962L3.964 7.294C4.672 5.163 6.656 3.58 9 3.58z"
       />
-    </svg>
-  );
-}
-
-function MicrosoftIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden>
-      <rect fill="#F25022" width="7.2" height="7.2" />
-      <rect fill="#7FBA00" x="8.8" width="7.2" height="7.2" />
-      <rect fill="#00A4EF" y="8.8" width="7.2" height="7.2" />
-      <rect fill="#FFB900" x="8.8" y="8.8" width="7.2" height="7.2" />
     </svg>
   );
 }

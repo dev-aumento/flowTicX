@@ -1,4 +1,7 @@
+import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
+
+export const AASO_SITE_URL = "https://aaso.tech";
 
 type BrandLogoProps = {
   /** `dark` = white wordmark on dark backgrounds. `light` = dark wordmark. `auto` follows theme. */
@@ -7,7 +10,18 @@ type BrandLogoProps = {
   mark?: boolean;
   className?: string;
   imgClassName?: string;
+  /** Public site link. Login screens use this so the logo opens aaso.tech. */
+  href?: string;
 };
+
+function LogoLink({ href, children }: { href?: string; children: ReactNode }) {
+  if (!href) return children;
+  return (
+    <a href={href} className="inline-flex min-w-0 max-w-full items-center">
+      {children}
+    </a>
+  );
+}
 
 const WORDMARK_CLASS = "h-8 w-auto max-w-full object-contain object-left";
 
@@ -31,14 +45,17 @@ export function BrandLogo({
   mark = false,
   className,
   imgClassName,
+  href,
 }: BrandLogoProps) {
   if (mark) {
     return (
-      <img
-        src="/aaso-favicon.png"
-        alt="Aaso"
-        className={cn("h-8 w-8 object-contain flex-shrink-0", imgClassName, className)}
-      />
+      <LogoLink href={href}>
+        <img
+          src="/aaso-favicon.png"
+          alt="Aaso"
+          className={cn("h-8 w-8 object-contain flex-shrink-0", imgClassName, className)}
+        />
+      </LogoLink>
     );
   }
 
@@ -46,28 +63,36 @@ export function BrandLogo({
 
   if (variant === "dark") {
     return (
-      <img
-        src="/aaso-logo.png"
-        alt="Aaso"
-        className={cn(imgClass, className)}
-      />
+      <LogoLink href={href}>
+        <img
+          src="/aaso-logo.png"
+          alt="Aaso"
+          className={cn(imgClass, className)}
+        />
+      </LogoLink>
     );
   }
 
   if (variant === "light") {
-    return <LightWordmark className={className} imgClassName={imgClassName} />;
+    return (
+      <LogoLink href={href}>
+        <LightWordmark className={className} imgClassName={imgClassName} />
+      </LogoLink>
+    );
   }
 
   return (
-    <span className={cn("inline-flex min-w-0", className)}>
-      <span className="dark:hidden">
-        <LightWordmark imgClassName={imgClassName} />
+    <LogoLink href={href}>
+      <span className={cn("inline-flex min-w-0", className)}>
+        <span className="dark:hidden">
+          <LightWordmark imgClassName={imgClassName} />
+        </span>
+        <img
+          src="/aaso-logo.png"
+          alt="Aaso"
+          className={cn(imgClass, "hidden dark:block")}
+        />
       </span>
-      <img
-        src="/aaso-logo.png"
-        alt="Aaso"
-        className={cn(imgClass, "hidden dark:block")}
-      />
-    </span>
+    </LogoLink>
   );
 }

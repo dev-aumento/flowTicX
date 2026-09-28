@@ -6,7 +6,7 @@ import {
   UserRound,
   Users,
 } from "lucide-react";
-import { BrandLogo } from "@/components/brand/BrandLogo";
+import { AASO_SITE_URL, BrandLogo } from "@/components/brand/BrandLogo";
 import { cn } from "@/lib/utils";
 
 const features = [
@@ -50,7 +50,7 @@ export function LoginShowcase() {
       <div className="relative z-10 flex min-h-0 flex-1 flex-col px-8 py-7 xl:px-12 xl:py-8">
         <div className="flex items-start justify-between gap-6">
           <div className="min-w-0">
-            <BrandLogo variant="dark" imgClassName="h-9" />
+            <BrandLogo variant="dark" imgClassName="h-9" href={AASO_SITE_URL} />
             <p className="mt-2 max-w-[240px] text-[11px] leading-snug text-white/65">
               The Operating System for Service Businesses
             </p>
