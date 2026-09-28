@@ -991,6 +991,51 @@ export const authRouter = createRouter({
       }
     }),
 
+  lookupClientWorkspaces: publicQuery
+    .input(z.object({ email: z.string().email().max(320) }))
+    .mutation(async ({ input }) => {
+      const email = input.email.trim().toLowerCase();
+      try {
+        const users = useMemoryStore()
+          ? mock.mockFindUsersByEmail(email)
+          : await findUsersByEmail(email);
+        if (!useMemoryStore()) await ensureSchema();
+
+        const clients: UserDoc[] = [];
+        for (const user of users) {
+          if (String(user.status).toLowerCase() !== "active") continue;
+          if (await isClientWorkspaceUser(user)) clients.push(user);
+        }
+
+        if (clients.length === 0) {
+          const listed = await listLoginWorkspaces(users);
+          return {
+            workspaces: [] as Array<{
+              organizationId: number;
+              organizationName: string;
+              roleLabel: string;
+            }>,
+            portal: listed.portal,
+            inactive: listed.inactive,
+          };
+        }
+
+        const described = await describeClientWorkspaces(clients);
+        return {
+          workspaces: described.map(({ userId: _userId, ...workspace }) => workspace),
+          portal: null as "client" | "finance" | "platform" | null,
+          inactive: false,
+        };
+      } catch (error) {
+        if (error instanceof TRPCError) throw error;
+        console.error("[auth] Client workspace lookup failed:", error);
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Unable to look up workspaces right now. Please try again.",
+        });
+      }
+    }),
+
   beginClientLogin: publicQuery
     .input(
       z.object({

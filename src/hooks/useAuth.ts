@@ -104,6 +104,7 @@ export function useAuth(_options?: UseAuthOptions) {
   }, [user, isPending, planEnded]);
 
   const lookupWorkspacesMutation = trpc.auth.lookupWorkspaces.useMutation();
+  const lookupClientWorkspacesMutation = trpc.auth.lookupClientWorkspaces.useMutation();
   const beginClientLoginMutation = trpc.auth.beginClientLogin.useMutation();
   const sendClientLoginCodeMutation = trpc.auth.sendClientLoginCode.useMutation();
   const resendClientLoginCodeMutation = trpc.auth.resendClientLoginCode.useMutation();
@@ -156,6 +157,26 @@ export function useAuth(_options?: UseAuthOptions) {
 
   const logoutMutation = trpc.auth.logout.useMutation();
   const resetPasswordMutation = trpc.auth.resetPassword.useMutation();
+
+  const lookupClientWorkspaces = useCallback(
+    (email: string) => {
+      if (AUTH_DISABLED) {
+        return Promise.resolve({
+          workspaces: [
+            {
+              organizationId: 1,
+              organizationName: "Aaso",
+              roleLabel: "Client",
+            },
+          ],
+          portal: null as "client" | "finance" | "platform" | null,
+          inactive: false,
+        });
+      }
+      return lookupClientWorkspacesMutation.mutateAsync({ email });
+    },
+    [lookupClientWorkspacesMutation],
+  );
 
   const lookupWorkspaces = useCallback(
     (email: string) => {
@@ -343,6 +364,7 @@ export function useAuth(_options?: UseAuthOptions) {
       isLoading: !authResolved || logoutMutation.isPending,
       isLoggingIn: loginMutation.isPending,
       isLookingUpWorkspaces: lookupWorkspacesMutation.isPending,
+      isLookingUpClientWorkspaces: lookupClientWorkspacesMutation.isPending,
       isBeginningClientLogin: beginClientLoginMutation.isPending,
       isSendingClientCode:
         sendClientLoginCodeMutation.isPending || resendClientLoginCodeMutation.isPending,
@@ -357,6 +379,7 @@ export function useAuth(_options?: UseAuthOptions) {
       error,
       login,
       lookupWorkspaces,
+      lookupClientWorkspaces,
       beginClientLogin,
       sendClientLoginCode,
       resendClientLoginCode,
@@ -375,6 +398,7 @@ export function useAuth(_options?: UseAuthOptions) {
       logoutMutation.isPending,
       loginMutation.isPending,
       lookupWorkspacesMutation.isPending,
+      lookupClientWorkspacesMutation.isPending,
       beginClientLoginMutation.isPending,
       sendClientLoginCodeMutation.isPending,
       resendClientLoginCodeMutation.isPending,
@@ -388,6 +412,7 @@ export function useAuth(_options?: UseAuthOptions) {
       error,
       login,
       lookupWorkspaces,
+      lookupClientWorkspaces,
       beginClientLogin,
       sendClientLoginCode,
       resendClientLoginCode,

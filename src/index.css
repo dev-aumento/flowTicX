@@ -413,7 +413,6 @@ html.dark textarea::placeholder {
 .sidebar-chrome,
 .portal-slate-gradient {
   background-color: #242629e5;
-  /* background-image: linear-gradient(to bottom,#677d937f,#677d93e5); */
 }
 
 /* Dark mode: previous charcoal sidebar (no light-mode gradient) */

@@ -1,9 +1,7 @@
 import { TRPCClientError } from "@trpc/client";
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router";
+import { useState } from "react";
 import {
   Building2,
-  Check,
   ChevronRight,
   FileText,
   FolderKanban,
@@ -14,21 +12,17 @@ import {
   Mail,
   Megaphone,
   Receipt,
-  ShieldCheck,
   Users,
 } from "lucide-react";
 import { AASO_SITE_URL, BrandLogo } from "@/components/brand/BrandLogo";
 import { Input } from "@/components/ui/input";
-import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/useAuth";
-import { writeAuthCache } from "@/lib/auth-cache";
 import { displayPlanEndedMessage } from "@/lib/plan-ended";
-import { getDefaultHomePath } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 
-type Step = "credentials" | "workspaces" | "code" | "success" | "forgot" | "register";
+type Step = "credentials" | "workspaces" | "forgot" | "register";
 
 type WorkspaceChoice = {
   organizationId: number;
@@ -50,19 +44,15 @@ function errorMessage(err: unknown, fallback: string) {
 }
 
 export default function ClientLogin() {
-  const navigate = useNavigate();
   const {
+    login,
     registerClient,
     resetPassword,
-    beginClientLogin,
-    sendClientLoginCode,
-    resendClientLoginCode,
-    verifyClientLogin,
+    lookupClientWorkspaces,
     isRegistering,
     isResettingPassword,
-    isBeginningClientLogin,
-    isSendingClientCode,
-    isVerifyingClientLogin,
+    isLoggingIn,
+    isLookingUpClientWorkspaces,
   } = useAuth();
 
   const [step, setStep] = useState<Step>("credentials");
@@ -73,22 +63,11 @@ export default function ClientLogin() {
   const [organizationName, setOrganizationName] = useState("");
   const [workspaces, setWorkspaces] = useState<WorkspaceChoice[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const [ticket, setTicket] = useState<string | null>(null);
-  const [challengeId, setChallengeId] = useState<string | null>(null);
-  const [code, setCode] = useState("");
-  const [previewCode, setPreviewCode] = useState<string | null>(null);
-  const [resendIn, setResendIn] = useState(0);
   const [helpNote, setHelpNote] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
   const selectedWorkspace = workspaces[selectedIndex] ?? null;
-
-  useEffect(() => {
-    if (resendIn <= 0) return;
-    const timer = window.setTimeout(() => setResendIn((value) => value - 1), 1000);
-    return () => window.clearTimeout(timer);
-  }, [resendIn]);
 
   function resetNotices() {
     setError(null);
@@ -99,68 +78,53 @@ export default function ClientLogin() {
     event.preventDefault();
     resetNotices();
     try {
-      const result = await beginClientLogin(email.trim().toLowerCase(), password);
-      setEmail(email.trim().toLowerCase());
-      setTicket(result.ticket);
+      const normalized = email.trim().toLowerCase();
+      const result = await lookupClientWorkspaces(normalized);
+      if (result.workspaces.length === 0) {
+        if (result.inactive) {
+          setError("This account isn't active. Ask your administrator to reactivate it.");
+          return;
+        }
+        if (result.portal === "finance") {
+          setError("This email uses the finance portal. Sign in there instead.");
+          return;
+        }
+        if (result.portal === "platform") {
+          setError("This email uses platform admin. Sign in there instead.");
+          return;
+        }
+        setError("No client workspace is linked to this email.");
+        return;
+      }
+      setEmail(normalized);
+      setPassword("");
       setWorkspaces(result.workspaces);
       setSelectedIndex(0);
-      setCode("");
-      setPreviewCode(null);
       setStep("workspaces");
     } catch (err) {
-      setError(errorMessage(err, "Unable to sign in. Please try again."));
+      setError(errorMessage(err, "Unable to look up your workspace. Please try again."));
     }
   }
 
   async function handleChooseWorkspace(event: React.FormEvent) {
     event.preventDefault();
     resetNotices();
-    if (!ticket || !selectedWorkspace) {
+    if (!selectedWorkspace) {
       setError("Select a workspace to continue");
       return;
     }
-    try {
-      const result = await sendClientLoginCode(ticket, selectedWorkspace.organizationId);
-      setChallengeId(result.challengeId);
-      setPreviewCode(result.previewCode ?? null);
-      setCode("");
-      setResendIn(result.resendInSeconds);
-      setStep("code");
-    } catch (err) {
-      setError(errorMessage(err, "Unable to send the sign-in code."));
-    }
-  }
-
-  async function handleResend() {
-    if (!challengeId || resendIn > 0 || isSendingClientCode) return;
-    resetNotices();
-    try {
-      const result = await resendClientLoginCode(challengeId);
-      setChallengeId(result.challengeId);
-      setPreviewCode(result.previewCode ?? null);
-      setCode("");
-      setResendIn(result.resendInSeconds);
-    } catch (err) {
-      setError(errorMessage(err, "Unable to resend the code."));
-    }
-  }
-
-  async function handleVerify(event: React.FormEvent) {
-    event.preventDefault();
-    resetNotices();
-    if (!challengeId || code.length !== 6) {
-      setError("Enter the 6-digit code");
+    if (!password.trim()) {
+      setError("Enter your password");
       return;
     }
     try {
-      const result = await verifyClientLogin(challengeId, code);
-      setStep("success");
-      window.setTimeout(() => {
-        writeAuthCache(result.user);
-        navigate(getDefaultHomePath(result.user), { replace: true });
-      }, 1400);
+      await login(email, password, {
+        portal: "client",
+        organizationId:
+          selectedWorkspace.organizationId > 0 ? selectedWorkspace.organizationId : undefined,
+      });
     } catch (err) {
-      setError(errorMessage(err, "That code is incorrect."));
+      setError(errorMessage(err, "Unable to sign in. Please try again."));
     }
   }
 
@@ -259,26 +223,6 @@ export default function ClientLogin() {
                   />
                 </div>
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="client-password" className="text-sm font-medium text-gray-700">
-                  Password
-                </Label>
-                <div className="relative">
-                  <Lock
-                    size={16}
-                    className="pointer-events-none absolute left-3.5 top-1/2 z-10 -translate-y-1/2 text-gray-400"
-                  />
-                  <PasswordInput
-                    id="client-password"
-                    autoComplete="current-password"
-                    placeholder="Enter your password"
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    className="h-12 rounded-xl border-gray-200 pl-10"
-                    required
-                  />
-                </div>
-              </div>
               <div className="flex justify-end">
                 <button
                   type="button"
@@ -292,7 +236,11 @@ export default function ClientLogin() {
                 </button>
               </div>
               {error ? <p className="text-sm text-red-500">{error}</p> : null}
-              <GreenButton busy={isBeginningClientLogin} label="Sign in" busyLabel="Checking account..." />
+              <GreenButton
+                busy={isLookingUpClientWorkspaces}
+                label="Continue"
+                busyLabel="Checking account..."
+              />
               <button
                 type="button"
                 onClick={() => setHelpNote((value) => !value)}
@@ -318,8 +266,8 @@ export default function ClientLogin() {
                 <h1 className="mt-4 text-xl font-bold text-[#111827]">Choose your workspace</h1>
                 <p className="mt-1 text-sm text-gray-500">
                   {workspaces.length > 1
-                    ? "You have access to multiple workspaces. Select one to continue."
-                    : "Select your workspace to continue."}
+                    ? "Select a workspace and enter your password."
+                    : "Enter your password to continue."}
                 </p>
               </div>
               <div className="space-y-2.5">
@@ -358,113 +306,65 @@ export default function ClientLogin() {
                   );
                 })}
               </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="client-password" className="text-sm font-medium text-gray-700">
+                  Password
+                </Label>
+                <div className="relative">
+                  <Lock
+                    size={16}
+                    className="pointer-events-none absolute left-3.5 top-1/2 z-10 -translate-y-1/2 text-gray-400"
+                  />
+                  <PasswordInput
+                    id="client-password"
+                    autoComplete="current-password"
+                    placeholder="Enter your password"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    className="h-12 rounded-xl border-gray-200 pl-10"
+                    required
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    resetNotices();
+                    setStep("forgot");
+                  }}
+                  className="text-sm font-medium text-[#22C55E] hover:text-[#16A34A]"
+                >
+                  Forgot password?
+                </button>
+              </div>
               {error ? <p className="text-sm text-red-500">{error}</p> : null}
               <button
                 type="submit"
-                disabled={isSendingClientCode}
+                disabled={isLoggingIn}
                 className="flex h-12 w-full items-center justify-center rounded-xl bg-[#2563EB] text-[15px] font-semibold text-white hover:bg-[#1D4ED8] disabled:opacity-60"
               >
-                {isSendingClientCode ? (
+                {isLoggingIn ? (
                   <>
                     <Loader2 size={16} className="mr-2 animate-spin" />
-                    Sending code...
+                    Signing in...
                   </>
                 ) : (
-                  "Continue"
-                )}
-              </button>
-            </form>
-          ) : null}
-
-          {step === "code" ? (
-            <form onSubmit={handleVerify} className="space-y-4">
-              <div className="text-center">
-                <span className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#DBEAFE] text-[#2563EB]">
-                  <ShieldCheck size={26} />
-                </span>
-                <h1 className="mt-4 text-xl font-bold text-[#111827]">Verify it&apos;s you</h1>
-                <p className="mt-1 text-sm text-gray-500">
-                  Enter the 6 digit code sent to
-                  <br />
-                  <span className="font-medium text-[#111827]">{email}</span>
-                </p>
-              </div>
-              <div className="flex justify-center">
-                <InputOTP maxLength={6} value={code} onChange={setCode}>
-                  <InputOTPGroup className="gap-2">
-                    {Array.from({ length: 6 }, (_, index) => (
-                      <InputOTPSlot
-                        key={index}
-                        index={index}
-                        className="h-12 w-11 rounded-lg border border-gray-200 text-lg first:rounded-lg first:border-l last:rounded-lg"
-                      />
-                    ))}
-                  </InputOTPGroup>
-                </InputOTP>
-              </div>
-              {previewCode ? (
-                <p className="rounded-xl bg-amber-50 px-3 py-2 text-center text-xs leading-relaxed text-amber-800">
-                  Outgoing email is not configured on this server yet, so the code is shown here:{" "}
-                  <span className="font-semibold tracking-widest">{previewCode}</span>
-                </p>
-              ) : null}
-              <p className="text-center text-sm text-gray-500">
-                Didn&apos;t receive the code?{" "}
-                {resendIn > 0 ? (
-                  <span className="font-medium text-[#2563EB]">Resend in {resendIn}s</span>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={handleResend}
-                    disabled={isSendingClientCode}
-                    className="font-medium text-[#2563EB] disabled:opacity-60"
-                  >
-                    Resend
-                  </button>
-                )}
-              </p>
-              {error ? <p className="text-sm text-red-500">{error}</p> : null}
-              <button
-                type="submit"
-                disabled={isVerifyingClientLogin || code.length !== 6}
-                className="flex h-12 w-full items-center justify-center rounded-xl bg-[#2563EB] text-[15px] font-semibold text-white hover:bg-[#1D4ED8] disabled:opacity-60"
-              >
-                {isVerifyingClientLogin ? (
-                  <>
-                    <Loader2 size={16} className="mr-2 animate-spin" />
-                    Verifying...
-                  </>
-                ) : (
-                  "Verify"
+                  "Sign in"
                 )}
               </button>
               <button
                 type="button"
                 onClick={() => {
                   resetNotices();
-                  setCode("");
+                  setPassword("");
                   setStep("credentials");
                 }}
                 className="w-full text-sm font-medium text-[#2563EB]"
               >
-                Use a different method
+                Use a different email
               </button>
             </form>
-          ) : null}
-
-          {step === "success" ? (
-            <div className="py-6 text-center">
-              <span className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-[#DCFCE7] text-[#16A34A]">
-                <Check size={32} strokeWidth={2.5} />
-              </span>
-              <h1 className="mt-5 text-xl font-bold text-[#111827]">Welcome back!</h1>
-              <p className="mt-1 text-sm text-gray-500">Redirecting you to your dashboard...</p>
-              <div className="mt-8 flex flex-col items-center gap-2 text-sm text-gray-500">
-                <Loader2 size={22} className="animate-spin text-[#2563EB]" />
-                <p className="font-medium text-[#111827]">Setting up your workspace</p>
-                <p className="text-xs">This will only take a moment.</p>
-              </div>
-            </div>
           ) : null}
 
           {step === "forgot" ? (
