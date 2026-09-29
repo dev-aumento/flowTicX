@@ -1,8 +1,11 @@
+import { useEffect } from 'react'
 import { Routes, Route, Navigate, Outlet, useParams, useSearchParams, useLocation } from 'react-router'
+import { toast } from 'sonner'
 import { AppLayout } from './components/layout/AppLayout'
 import { useAuth } from './hooks/useAuth'
 import { AUTH_DISABLED, LOGIN_PATH } from './const'
 import { canAccessRoute, getDefaultHomePath, getLoginPathForUser, hasAnyPermission, hasPermission } from './lib/permissions'
+import { hasPlanFeature, planFeatureForPath } from './lib/plan-features'
 import { readPlanEndedNotice } from './lib/plan-ended'
 import { isFinanceRoleOnly, isHrUser } from './lib/leave-policy'
 import { readAuthCache } from './lib/auth-cache'
@@ -177,6 +180,13 @@ function ProtectedRoute({
 
 function PermissionRoute({ path, children }: { path: string; children: React.ReactNode }) {
   const { user, isLoading } = useAuth()
+  const feature = planFeatureForPath(path)
+  const blockedByPlan = Boolean(user && feature && !hasPlanFeature(user, feature))
+
+  useEffect(() => {
+    if (!blockedByPlan) return
+    toast.error("This isn't included in your plan. Upgrade your plan to use more tools or functions.")
+  }, [blockedByPlan, path])
 
   if (isLoading) return <LoadingScreen />
   if (!canAccessRoute(user, path)) {

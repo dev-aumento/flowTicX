@@ -25,6 +25,10 @@ export function notificationTarget(
     }
     return isClientPortalUser(viewer) ? "/client/invoices" : "/admin/invoices";
   }
+  if (type === "plan_limit") {
+    if (String(viewer?.role ?? "").toLowerCase() === "admin") return "/admin/pricing";
+    return notif.link || "/";
+  }
   if (type === "plan_joined" || type === "plan_updated" || type === "plan_cancelled") {
     if (isPlatformUser(viewer)) {
       return notif.relatedOrganizationId

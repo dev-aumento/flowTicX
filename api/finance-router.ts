@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { createRouter, authedQuery } from "./middleware";
+import { createRouter, authedQuery as signedInQuery } from "./middleware";
+import { assertPlanFeature } from "./lib/plan-guard";
 import { ensureSchema } from "./lib/migrate";
 import {
   getCollection,
@@ -24,6 +25,11 @@ import type {
 import { orgFilter, requireOrganizationId } from "./lib/tenant";
 import { assertPermission } from "./lib/permissions";
 import { invoiceBalanceDue, invoiceTotal, isInvoiceOutstanding } from "@/lib/invoice-store";
+
+const authedQuery = signedInQuery.use(async ({ ctx, next }) => {
+  if (ctx.user) await assertPlanFeature(ctx.user, "finance");
+  return next();
+});
 
 function useMock() {
   return isAuthDisabled() || !hasMongoConfigured();

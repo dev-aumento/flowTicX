@@ -53,6 +53,7 @@ export type NotificationType =
   | "plan_joined"
   | "plan_updated"
   | "plan_cancelled"
+  | "plan_limit"
   | "invoice_created"
   | "invoice_updated";
 

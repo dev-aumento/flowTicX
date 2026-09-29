@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { createRouter, authedQuery } from "./middleware";
+import { assertPlanFeature } from "./lib/plan-guard";
 import { isAuthDisabled } from "./lib/dev-mode";
 import * as mock from "./lib/mock-store";
 import {
@@ -22,6 +23,7 @@ export const subtaskRouter = createRouter({
   create: authedQuery
     .input(z.object({ taskId: z.number(), title: z.string().min(1) }))
     .mutation(async ({ input, ctx }) => {
+      await assertPlanFeature(ctx.user, "tasks");
       if (useMock()) {
         return mock.mockCreateSubtask(input.taskId, input.title, ctx.user);
       }

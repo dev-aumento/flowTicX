@@ -7,21 +7,25 @@ import { cn } from "@/lib/utils";
 export function PlanPricingCard({
   plan,
   selected = false,
+  plain = false,
   action,
   footer,
 }: {
   plan: PlatformPlan;
   selected?: boolean;
+  /** Master admin catalog: no marketing badge or highlighted border. */
+  plain?: boolean;
   action?: ReactNode;
   footer?: ReactNode;
 }) {
-  const featured = isPopularPlan(plan) && !selected;
+  const featured = !plain && isPopularPlan(plan) && !selected;
   const lines = planChecklist(plan);
 
   return (
     <article
       className={cn(
-        "relative flex h-full flex-col rounded-2xl border bg-white px-5 pb-5 pt-7 shadow-sm dark:bg-[#0F172A]",
+        "relative flex h-full flex-col rounded-2xl border bg-white px-5 pb-5 shadow-sm dark:bg-[#0F172A]",
+        plain ? "pt-5" : "pt-7",
         selected
           ? "border-[#2563EB] ring-2 ring-[#2563EB]/20 dark:border-blue-400"
           : featured
@@ -29,7 +33,7 @@ export function PlanPricingCard({
             : "border-[#E6E8EC] dark:border-[#1E293B]",
       )}
     >
-      {plan.badge ? (
+      {!plain && plan.badge ? (
         <span
           className={cn(
             "absolute left-1/2 top-0 -translate-x-1/2 -translate-y-1/2 rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.08em]",

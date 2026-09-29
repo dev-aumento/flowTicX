@@ -26,7 +26,8 @@ import { Collections } from "@db/mongo/collections";
 import type { ProjectDoc, ProjectMemberDoc, TaskDoc, UserDoc } from "@db/mongo/types";
 import { ensureSchema } from "./lib/migrate";
 import { belongsToUserOrg, orgFilter, requireOrganizationId, resolveClientWorkspace } from "./lib/tenant";
-import { assertCanAddProject } from "./lib/plan-capacity";
+import { assertCanAddProject, notifyIfProjectLimitReached } from "./lib/plan-capacity";
+import { assertPlanFeature } from "./lib/plan-guard";
 import {
   attachClientToMatchedProject,
   filterClientDuplicateProjects,
@@ -427,6 +428,7 @@ export const projectRouter = createRouter({
     }))
     .mutation(async ({ input, ctx }) => {
       await assertCanCreateProject(ctx.user);
+      await assertPlanFeature(ctx.user, "projects");
       await ensureSchema();
       const now = new Date();
       const organizationId = requireOrganizationId(ctx.user);
@@ -444,7 +446,7 @@ export const projectRouter = createRouter({
         }
       }
 
-      await assertCanAddProject(organizationId);
+      await assertCanAddProject(organizationId, ctx.user.id);
 
       const project = await insertDoc<ProjectDoc>(Collections.projects, {
         name: input.name,
@@ -469,6 +471,7 @@ export const projectRouter = createRouter({
         message: `${creatorName} created project "${project.name}"`,
         projectId: project.id,
       });
+      await notifyIfProjectLimitReached(organizationId, ctx.user.id);
 
       return { ...project, creator: ctx.user };
     }),

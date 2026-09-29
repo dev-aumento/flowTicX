@@ -4,6 +4,38 @@ import { defaultEntitlement, type PlanLimits } from "@/lib/plan-entitlements";
 import { getCollection } from "../queries/connection";
 import { findOrganizationById } from "./tenant";
 import { findPlatformPlan } from "./platform-plans";
+import { notifyPlanLimitReached, PLAN_LIMIT_MESSAGE } from "./plan-guard";
+
+export async function notifyIfProjectLimitReached(organizationId: number, actorId: number | null) {
+  const limits = await limitsForOrganization(organizationId);
+  if (!limits || limits.projects == null) return;
+  const projects = await getCollection(Collections.projects);
+  const count = await projects.countDocuments({
+    organizationId,
+    status: { $nin: ["archived"] },
+  });
+  if (count >= limits.projects) await notifyPlanLimitReached(organizationId, actorId);
+}
+
+export async function notifyIfMemberLimitReached(organizationId: number, actorId: number | null) {
+  const limits = await limitsForOrganization(organizationId);
+  if (!limits || limits.teamMembers == null) return;
+  const users = await getCollection(Collections.users);
+  const active = await users.countDocuments({
+    organizationId,
+    role: { $ne: "platform" },
+    status: { $nin: ["inactive", "suspended"] },
+  });
+  const invites = await getCollection(Collections.employeeInvites);
+  const pending = await invites.countDocuments({
+    organizationId,
+    status: "pending",
+    expiresAt: { $gt: new Date() },
+  });
+  if (active + pending >= limits.teamMembers) {
+    await notifyPlanLimitReached(organizationId, actorId);
+  }
+}
 
 export async function limitsForOrganization(organizationId: number): Promise<PlanLimits | null> {
   const org = await findOrganizationById(organizationId);
@@ -13,7 +45,7 @@ export async function limitsForOrganization(organizationId: number): Promise<Pla
   return catalog?.limits ?? defaultEntitlement(slug).limits;
 }
 
-export async function assertCanAddProject(organizationId: number) {
+export async function assertCanAddProject(organizationId: number, actorId?: number | null) {
   const limits = await limitsForOrganization(organizationId);
   if (!limits || limits.projects == null) return;
 
@@ -23,10 +55,10 @@ export async function assertCanAddProject(organizationId: number) {
     status: { $nin: ["archived"] },
   });
   if (count >= limits.projects) {
-    const noun = limits.projects === 1 ? "project" : "projects";
+    await notifyPlanLimitReached(organizationId, actorId ?? null);
     throw new TRPCError({
       code: "FORBIDDEN",
-      message: `This plan allows ${limits.projects} active ${noun}. Archive a project or upgrade the plan to add another.`,
+      message: PLAN_LIMIT_MESSAGE,
     });
   }
 }
@@ -40,7 +72,7 @@ async function activeMemberCount(organizationId: number) {
   });
 }
 
-export async function assertCanInviteMember(organizationId: number) {
+export async function assertCanInviteMember(organizationId: number, actorId?: number | null) {
   const limits = await limitsForOrganization(organizationId);
   if (!limits || limits.teamMembers == null) return;
 
@@ -52,22 +84,24 @@ export async function assertCanInviteMember(organizationId: number) {
     expiresAt: { $gt: new Date() },
   });
   if (active + pending >= limits.teamMembers) {
+    await notifyPlanLimitReached(organizationId, actorId ?? null);
     throw new TRPCError({
       code: "FORBIDDEN",
-      message: `This plan allows up to ${limits.teamMembers} team members. Upgrade the plan to invite more people.`,
+      message: PLAN_LIMIT_MESSAGE,
     });
   }
 }
 
-export async function assertCanAddMember(organizationId: number) {
+export async function assertCanAddMember(organizationId: number, actorId?: number | null) {
   const limits = await limitsForOrganization(organizationId);
   if (!limits || limits.teamMembers == null) return;
 
   const active = await activeMemberCount(organizationId);
   if (active >= limits.teamMembers) {
+    await notifyPlanLimitReached(organizationId, actorId ?? null);
     throw new TRPCError({
       code: "FORBIDDEN",
-      message: `This plan allows up to ${limits.teamMembers} team members. Upgrade the plan to add another person.`,
+      message: PLAN_LIMIT_MESSAGE,
     });
   }
 }

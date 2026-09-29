@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { createRouter, authedQuery } from "./middleware";
+import { assertPlanFeature } from "./lib/plan-guard";
 import { isAuthDisabled } from "./lib/dev-mode";
 import * as mock from "./lib/mock-store";
 import { ensureSchema } from "./lib/migrate";
@@ -518,6 +519,7 @@ export const taskRouter = createRouter({
       stage: projectStageSchema.optional(),
     }))
     .mutation(async ({ input, ctx }) => {
+      await assertPlanFeature(ctx.user, "tasks");
       assertPermission(ctx.user, "tasks.create");
 
       await assertTaskMemberAllowed(input.assigneeId ?? null);

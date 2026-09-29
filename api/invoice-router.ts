@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { createRouter, authedQuery } from "./middleware";
+import { assertPlanFeature } from "./lib/plan-guard";
 import { ensureSchema } from "./lib/migrate";
 import {
   getCollection,
@@ -225,6 +226,7 @@ export const invoiceRouter = createRouter({
   create: authedQuery
     .input(invoiceInputSchema)
     .mutation(async ({ ctx, input }) => {
+      await assertPlanFeature(ctx.user, "invoices");
       assertCanMutateInvoices(ctx.user);
       const now = new Date();
       const organizationId = requireOrganizationId(ctx.user);

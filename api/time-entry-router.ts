@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { createRouter, authedQuery, managerQuery, adminOrHrQuery } from "./middleware";
+import { assertPlanFeature } from "./lib/plan-guard";
 import { isAuthDisabled } from "./lib/dev-mode";
 import { assertPermission, hasPermission } from "./lib/permissions";
 import * as mock from "./lib/mock-store";
@@ -303,6 +304,7 @@ export const timeEntryRouter = createRouter({
         .optional(),
     )
     .mutation(async ({ ctx, input }) => {
+      await assertPlanFeature(ctx.user, "time_tracking");
       await assertClockInWithinGeofence({
         user: ctx.user,
         latitude: input?.latitude,

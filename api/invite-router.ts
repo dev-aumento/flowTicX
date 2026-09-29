@@ -28,7 +28,7 @@ import {
   INVITED_CLIENT_PERMISSIONS,
   toSessionUser,
 } from "./lib/client-workspace";
-import { assertCanAddMember, assertCanInviteMember } from "./lib/plan-capacity";
+import { assertCanAddMember, assertCanInviteMember, notifyIfMemberLimitReached } from "./lib/plan-capacity";
 import { getEmployeeDefaultPermissions } from "./lib/employee-defaults";
 import { ensureCustomerFromClientUser } from "./lib/sync-customers-from-clients";
 
@@ -141,7 +141,7 @@ export const inviteRouter = createRouter({
       }
 
       await ensureSchema();
-      await assertCanInviteMember(organizationId);
+      await assertCanInviteMember(organizationId, ctx.user.id);
 
       const existingUser = await findUserByEmail(email);
       if (existingUser) {
@@ -181,6 +181,7 @@ export const inviteRouter = createRouter({
         acceptedAt: null,
         createdAt: new Date(),
       });
+      await notifyIfMemberLimitReached(organizationId, ctx.user.id);
 
       return {
         token,
@@ -376,7 +377,7 @@ export const inviteRouter = createRouter({
         });
       }
 
-      await assertCanAddMember(invite.organizationId);
+      await assertCanAddMember(invite.organizationId, null);
 
       const email = input.email.toLowerCase();
       if (invite.email && invite.email.toLowerCase() !== email) {

@@ -3,6 +3,7 @@ import { TRPCError } from "@trpc/server";
 import { Collections } from "@db/mongo/collections";
 import type { LeaveRequestDoc, NotificationDoc, PublicHolidayDoc, LeaveUsageOverrideDoc, UserDoc } from "@db/mongo/types";
 import { createRouter, authedQuery } from "./middleware";
+import { assertPlanFeature } from "./lib/plan-guard";
 import { ensureSchema } from "./lib/migrate";
 import { isAuthDisabled } from "./lib/dev-mode";
 import { hasMongoConfigured, getCollection, insertDoc, updateById, findById } from "./queries/connection";
@@ -393,6 +394,7 @@ export const leaveRouter = createRouter({
     }),
 
   submitRequest: authedQuery.input(applySchema).mutation(async ({ ctx, input }) => {
+    await assertPlanFeature(ctx.user, "leave");
     if (useMock()) return mock.mockApplyLeave(ctx.user.id, input);
 
     await ensureSchema();
@@ -605,6 +607,7 @@ export const leaveRouter = createRouter({
 
   /** HR/admin creates a leave entry for an employee (already approved or rejected). */
   createManualEntry: authedQuery.input(manualEntrySchema).mutation(async ({ ctx, input }) => {
+    await assertPlanFeature(ctx.user, "leave");
     assertLeaveManager(ctx.user);
     if (useMock()) return mock.mockCreateManualLeave(ctx.user.id, input);
 

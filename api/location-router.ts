@@ -3,6 +3,7 @@ import { TRPCError } from "@trpc/server";
 import { Collections } from "@db/mongo/collections";
 import type { LeaveRequestDoc, WorkLocationDoc } from "@db/mongo/types";
 import { createRouter, authedQuery } from "./middleware";
+import { assertPlanFeature } from "./lib/plan-guard";
 import { ensureSchema } from "./lib/migrate";
 import { isAuthDisabled } from "./lib/dev-mode";
 import {
@@ -221,6 +222,7 @@ export const locationRouter = createRouter({
   create: authedQuery
     .input(locationInputSchema)
     .mutation(async ({ ctx, input }) => {
+      await assertPlanFeature(ctx.user, "attendance");
       assertHrOrAdmin(ctx.user);
       if (isAuthDisabled() || !hasMongoConfigured()) {
         return mock.mockCreateWorkLocation({

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { Check, Link2, Loader2 } from "lucide-react";
 import { trpc } from "@/providers/trpc";
 import { Invite } from "@contracts/constants";
@@ -49,7 +50,9 @@ export function InviteUserDialog({
       void utils.invite.list.invalidate();
     },
     onError: (err) => {
-      setInviteError(err.message || "Failed to generate invite link. Please try again.");
+      const message = err.message || "Failed to generate invite link. Please try again.";
+      setInviteError(message);
+      toast.error(message);
     },
   });
 

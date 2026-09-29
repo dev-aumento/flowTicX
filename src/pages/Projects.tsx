@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import { trpc } from "@/providers/trpc";
 import { useAuth } from "@/hooks/useAuth";
 import { hasPermission } from "@/lib/permissions";
@@ -73,7 +74,9 @@ function ProjectsWebPage() {
       if (project?.id) navigate(`/projects/${project.id}`);
     },
     onError: (error) => {
-      setCreateError(error.message || "Could not create project.");
+      const message = error.message || "Could not create project.";
+      setCreateError(message);
+      toast.error(message);
     },
   });
 
