@@ -18,6 +18,7 @@ import { formatMoney, formatOutstandingByCurrency, invoiceBalanceDue, invoiceSta
 import { buildAllTasksViewPath, buildMyTasksViewPath } from "@/lib/task-notification-link";
 import { canCreateProject as userCanCreateProject } from "@/lib/create-project-permission";
 import { hasPermission } from "@/lib/permissions";
+import { hasPlanFeature } from "@/lib/plan-features";
 import { isClientPortalUser } from "@/lib/client-portal";
 import { clientCanViewDueDate } from "@/lib/client-visibility";
 import { UserAvatar } from "@/components/shared/UserAvatar";
@@ -122,6 +123,10 @@ export function ClientDashboard() {
   const [inviteOpen, setInviteOpen] = useState(false);
   const canCreateProject = userCanCreateProject(user);
   const showDueDate = clientCanViewDueDate(user);
+  const showTasks = hasPlanFeature(user, "tasks");
+  const showProjects = hasPlanFeature(user, "projects");
+  const showInvoices = hasPlanFeature(user, "invoices");
+  const showReports = hasPlanFeature(user, "analytics");
 
   const { data: projects, isLoading: projectsLoading } = trpc.project.list.useQuery(
     undefined,
@@ -133,7 +138,7 @@ export function ClientDashboard() {
   );
   const { data: invoices = [] } = trpc.invoice.list.useQuery(undefined, {
     ...dashboardQueryOptions,
-    enabled: isClientPortalUser(user) || canManageInvoices,
+    enabled: showInvoices && (isClientPortalUser(user) || canManageInvoices),
     refetchInterval: 10_000,
     refetchOnWindowFocus: true,
   });
@@ -224,12 +229,14 @@ export function ClientDashboard() {
       </div>
 
       <div className="flex flex-wrap gap-2">
+        {showReports ? (
         <Link
           to="/client/reports"
           className="h-8 px-3 flex items-center justify-center rounded-full bg-white border border-[#E8E5E1] text-[13px] text-[#3E3F42] hover:bg-[#EDEAE6] dark:bg-[#2A2B2D] dark:border-[#3D3E40] dark:text-[#C8C7C5]"
         >
           Reports & analytics
         </Link>
+        ) : null}
         {approvals > 0 ? (
           <Link
             to="/client/approvals"
@@ -238,7 +245,7 @@ export function ClientDashboard() {
             {approvals} awaiting approval
           </Link>
         ) : null}
-        {unpaid.length > 0 ? (
+        {showInvoices && unpaid.length > 0 ? (
           <Link
             to="/client/invoices"
             className="h-8 px-3 flex items-center justify-center rounded-full bg-white border border-[#E8E5E1] text-[13px] text-[#3E3F42] hover:bg-[#EDEAE6] dark:bg-[#2A2B2D] dark:border-[#3D3E40] dark:text-[#C8C7C5]"
@@ -254,6 +261,7 @@ export function ClientDashboard() {
         </div>
       ) : (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          {showTasks ? (
           <Widget title="My tasks">
             <div className="flex items-center gap-1 mb-3 -mt-1">
               {(
@@ -369,7 +377,9 @@ export function ClientDashboard() {
               </button>
             </div>
           </Widget>
+          ) : null}
 
+          {showProjects ? (
           <Widget
             title="Projects"
             action={
@@ -429,7 +439,9 @@ export function ClientDashboard() {
               <EmptyRow text="Create a project to organize work with your team." />
             ) : null}
           </Widget>
+          ) : null}
 
+          {showInvoices ? (
           <div className="xl:col-span-2">
             <Widget
               title="Invoices"
@@ -474,6 +486,7 @@ export function ClientDashboard() {
               )}
             </Widget>
           </div>
+          ) : null}
 
           <div className="xl:col-span-2">
             <Widget title="People">

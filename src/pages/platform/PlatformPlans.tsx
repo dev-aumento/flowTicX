@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
-import { Check, Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
 import { trpc } from "@/providers/trpc";
-import { formatInr, PLAN_FEATURE_CATALOG } from "@/lib/platform-admin";
+import { PlanPricingCard } from "@/components/billing/PlanPricingCard";
+import { PLAN_HIGHLIGHTS } from "@/lib/plan-entitlements";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
@@ -13,16 +14,43 @@ type PlanForm = {
   amount: string;
   description: string;
   durationDays: string;
-  featureKeys: string[];
+  badge: string;
+  ctaLabel: string;
+  storageLabel: string;
+  projects: string;
+  projectsUnlimited: boolean;
+  members: string;
+  membersUnlimited: boolean;
+  storage: string;
+  storageUnlimited: boolean;
+  highlightKeys: string[];
 };
 
 const EMPTY_FORM: PlanForm = {
   name: "",
   amount: "0",
   description: "",
-  durationDays: "365",
-  featureKeys: [],
+  durationDays: "30",
+  badge: "",
+  ctaLabel: "Select plan",
+  storageLabel: "",
+  projects: "3",
+  projectsUnlimited: false,
+  members: "5",
+  membersUnlimited: false,
+  storage: "1",
+  storageUnlimited: false,
+  highlightKeys: [],
 };
+
+function parseQuota(unlimited: boolean, raw: string, label: string) {
+  if (unlimited) return null;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`Enter a whole number for ${label}, or mark it unlimited`);
+  }
+  return value;
+}
 
 export default function PlatformPlans() {
   const utils = trpc.useUtils();
@@ -37,6 +65,8 @@ export default function PlatformPlans() {
         utils.platform.overview.invalidate(),
         utils.platform.listClients.invalidate(),
         utils.platform.getClient.invalidate(),
+        utils.subscription.plans.invalidate(),
+        utils.auth.me.invalidate(),
       ]);
       const updated = result.subscribersUpdated ?? 0;
       toast.success(
@@ -81,13 +111,33 @@ export default function PlatformPlans() {
       toast.error("Enter duration in days");
       return;
     }
+    const ctaLabel = form.ctaLabel.trim();
+    if (!ctaLabel) {
+      toast.error("Enter a button label");
+      return;
+    }
+    let limits;
+    try {
+      limits = {
+        projects: parseQuota(form.projectsUnlimited, form.projects, "projects"),
+        teamMembers: parseQuota(form.membersUnlimited, form.members, "team members"),
+        storageGb: parseQuota(form.storageUnlimited, form.storage, "storage"),
+      };
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Enter valid limits");
+      return;
+    }
     upsert.mutate({
       id: form.id,
       name,
       amount,
       description: form.description.trim(),
       durationDays,
-      featureKeys: form.featureKeys,
+      limits,
+      highlightKeys: form.highlightKeys,
+      badge: form.badge.trim() || null,
+      ctaLabel,
+      storageLabel: form.storageLabel.trim() || null,
     });
   }
 
@@ -98,13 +148,14 @@ export default function PlatformPlans() {
           <h1 className="text-2xl font-bold tracking-tight text-[#111827] sm:text-[28px] dark:text-white">
             Subscription Plans
           </h1>
-          <p className="mt-1 text-sm text-[#6B7280]">
-            Edit names, pricing, and the modules included in each plan.
+          <p className="mt-1 max-w-2xl text-sm text-[#6B7280]">
+            Set the price, project limit, team size, storage, and the checklist for each plan. Saved items
+            apply to admins, project managers, employees, and the client portal.
           </p>
         </div>
         <button
           type="button"
-          onClick={() => setForm({ ...EMPTY_FORM })}
+          onClick={() => setForm({ ...EMPTY_FORM, highlightKeys: [] })}
           className="inline-flex h-11 items-center gap-2 rounded-xl bg-[#2563EB] px-4 text-sm font-semibold text-white hover:bg-[#1D4ED8]"
         >
           <Plus size={16} />
@@ -158,29 +209,88 @@ export default function PlatformPlans() {
                 className="h-11 rounded-xl"
               />
             </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="plan-cta">Button label</Label>
+              <Input
+                id="plan-cta"
+                value={form.ctaLabel}
+                onChange={(event) => setForm({ ...form, ctaLabel: event.target.value })}
+                className="h-11 rounded-xl"
+                placeholder="Get Started Now"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="plan-badge">Badge</Label>
+              <Input
+                id="plan-badge"
+                value={form.badge}
+                onChange={(event) => setForm({ ...form, badge: event.target.value })}
+                className="h-11 rounded-xl"
+                placeholder="Most popular"
+              />
+            </div>
             <div className="space-y-1.5 sm:col-span-2">
-              <Label htmlFor="plan-description">Description</Label>
+              <Label htmlFor="plan-description">Audience</Label>
               <Input
                 id="plan-description"
                 value={form.description}
                 onChange={(event) => setForm({ ...form, description: event.target.value })}
                 className="h-11 rounded-xl"
-                placeholder="What this plan is for"
+                placeholder="Who this plan is for"
               />
             </div>
           </div>
 
+          <div className="mt-5 grid gap-4 lg:grid-cols-3">
+            <QuotaField
+              id="plan-projects"
+              label="Active projects"
+              value={form.projects}
+              unlimited={form.projectsUnlimited}
+              onValue={(projects) => setForm({ ...form, projects })}
+              onUnlimited={(projectsUnlimited) => setForm({ ...form, projectsUnlimited })}
+            />
+            <QuotaField
+              id="plan-members"
+              label="Team members"
+              value={form.members}
+              unlimited={form.membersUnlimited}
+              onValue={(members) => setForm({ ...form, members })}
+              onUnlimited={(membersUnlimited) => setForm({ ...form, membersUnlimited })}
+            />
+            <QuotaField
+              id="plan-storage"
+              label="Cloud storage (GB)"
+              value={form.storage}
+              unlimited={form.storageUnlimited}
+              onValue={(storage) => setForm({ ...form, storage })}
+              onUnlimited={(storageUnlimited) => setForm({ ...form, storageUnlimited })}
+            />
+          </div>
+          <div className="mt-4 space-y-1.5">
+            <Label htmlFor="plan-storage-label">Storage line on the card</Label>
+            <Input
+              id="plan-storage-label"
+              value={form.storageLabel}
+              onChange={(event) => setForm({ ...form, storageLabel: event.target.value })}
+              className="h-11 rounded-xl"
+              placeholder="25 GB fast cloud storage"
+              disabled={form.storageUnlimited}
+            />
+          </div>
+
           <div className="mt-5">
-            <p className="text-sm font-semibold text-[#111827] dark:text-white">Included functionality</p>
+            <p className="text-sm font-semibold text-[#111827] dark:text-white">Included on this plan</p>
             <p className="mt-1 text-sm text-[#6B7280]">
-              Customers on this plan get these modules in Aaso.
+              Checked lines appear on the pricing card. Lines that map to a module also show up in the
+              workspace menus.
             </p>
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
-              {PLAN_FEATURE_CATALOG.map((feature) => {
-                const checked = form.featureKeys.includes(feature.key);
+              {PLAN_HIGHLIGHTS.map((item) => {
+                const checked = form.highlightKeys.includes(item.key);
                 return (
                   <label
-                    key={feature.key}
+                    key={item.key}
                     className={cn(
                       "flex cursor-pointer items-start gap-3 rounded-xl border px-3 py-3",
                       checked
@@ -194,17 +304,14 @@ export default function PlatformPlans() {
                       onChange={() =>
                         setForm({
                           ...form,
-                          featureKeys: checked
-                            ? form.featureKeys.filter((key) => key !== feature.key)
-                            : [...form.featureKeys, feature.key],
+                          highlightKeys: checked
+                            ? form.highlightKeys.filter((key) => key !== item.key)
+                            : [...form.highlightKeys, item.key],
                         })
                       }
                       className="mt-1 h-4 w-4 accent-[#2563EB]"
                     />
-                    <span>
-                      <span className="block text-sm font-medium">{feature.label}</span>
-                      <span className="block text-xs text-[#6B7280]">{feature.description}</span>
-                    </span>
+                    <span className="text-sm font-medium">{item.label}</span>
                   </label>
                 );
               })}
@@ -244,62 +351,92 @@ export default function PlatformPlans() {
           Loading plans...
         </div>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid items-stretch gap-5 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
           {(plans ?? []).map((plan) => {
             const count = counts.get(plan.slug) ?? 0;
             return (
-              <div
+              <PlanPricingCard
                 key={plan.slug}
-                className="flex flex-col rounded-2xl border border-[#E6E8EC] bg-white p-5 shadow-sm dark:border-[#1E293B] dark:bg-[#0F172A]"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#6B7280]">
-                      {plan.name}
+                plan={plan}
+                footer={
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm text-[#2563EB]">
+                      {count} {count === 1 ? "workspace" : "workspaces"}
                     </p>
-                    <p className="mt-3 text-3xl font-bold">
-                      {plan.amount === 0 ? "Free" : formatInr(plan.amount)}
-                    </p>
-                    <p className="mt-1 text-xs text-[#6B7280]">{plan.durationDays} days</p>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setForm({
+                          id: plan.id,
+                          name: plan.name,
+                          amount: String(plan.amount),
+                          description: plan.description,
+                          durationDays: String(plan.durationDays),
+                          badge: plan.badge ?? "",
+                          ctaLabel: plan.ctaLabel,
+                          storageLabel: plan.storageLabel ?? "",
+                          projects: plan.limits.projects == null ? "" : String(plan.limits.projects),
+                          projectsUnlimited: plan.limits.projects == null,
+                          members: plan.limits.teamMembers == null ? "" : String(plan.limits.teamMembers),
+                          membersUnlimited: plan.limits.teamMembers == null,
+                          storage: plan.limits.storageGb == null ? "" : String(plan.limits.storageGb),
+                          storageUnlimited: plan.limits.storageGb == null,
+                          highlightKeys: plan.highlightKeys,
+                        })
+                      }
+                      className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-[#E6E8EC] bg-white px-2.5 text-xs font-semibold text-[#111827] hover:bg-[#F8FAFC] dark:border-[#334155] dark:bg-[#0F172A] dark:text-white"
+                    >
+                      <Pencil size={13} />
+                      Edit
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setForm({
-                        id: plan.id,
-                        name: plan.name,
-                        amount: String(plan.amount),
-                        description: plan.description,
-                        durationDays: String(plan.durationDays),
-                        featureKeys: plan.featureKeys,
-                      })
-                    }
-                    className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-[#E6E8EC] px-2.5 text-xs font-semibold text-[#111827] hover:bg-[#F8FAFC] dark:border-[#334155] dark:text-white"
-                  >
-                    <Pencil size={13} />
-                    Edit
-                  </button>
-                </div>
-                <p className="mt-3 text-sm text-[#6B7280]">{plan.description}</p>
-                <ul className="mt-4 space-y-1.5">
-                  {plan.featureKeys.map((key) => {
-                    const feature = PLAN_FEATURE_CATALOG.find((item) => item.key === key);
-                    return (
-                      <li key={key} className="flex items-start gap-2 text-sm text-[#111827] dark:text-slate-200">
-                        <Check size={14} className="mt-0.5 shrink-0 text-[#2563EB]" />
-                        {feature?.label ?? key}
-                      </li>
-                    );
-                  })}
-                </ul>
-                <p className="mt-auto pt-5 text-sm text-[#2563EB]">
-                  {count} {count === 1 ? "workspace" : "workspaces"}
-                </p>
-              </div>
+                }
+              />
             );
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+function QuotaField({
+  id,
+  label,
+  value,
+  unlimited,
+  onValue,
+  onUnlimited,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  unlimited: boolean;
+  onValue: (value: string) => void;
+  onUnlimited: (unlimited: boolean) => void;
+}) {
+  return (
+    <div className="space-y-1.5 rounded-xl border border-[#E6E8EC] p-3 dark:border-[#334155]">
+      <Label htmlFor={id}>{label}</Label>
+      <Input
+        id={id}
+        type="number"
+        min={0}
+        value={unlimited ? "" : value}
+        disabled={unlimited}
+        placeholder={unlimited ? "Unlimited" : "0"}
+        onChange={(event) => onValue(event.target.value)}
+        className="h-11 rounded-xl"
+      />
+      <label className="flex items-center gap-2 text-sm text-[#111827] dark:text-slate-200">
+        <input
+          type="checkbox"
+          checked={unlimited}
+          onChange={(event) => onUnlimited(event.target.checked)}
+          className="h-4 w-4 accent-[#2563EB]"
+        />
+        Unlimited
+      </label>
     </div>
   );
 }

@@ -22,12 +22,12 @@ import { Label } from "@/components/ui/label";
 import { trpc } from "@/providers/trpc";
 import {
   addPlanDuration,
-  featureLabel,
   formatInr,
   formatPlanDate,
   formatPlanDuration,
   planLabel,
 } from "@/lib/platform-admin";
+import { planChecklist, teamMemberLabel } from "@/lib/plan-entitlements";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -481,15 +481,16 @@ export default function PlatformClientDetail() {
                 <dt className="text-[#6B7280]">Purchased</dt>
                 <dd className="font-semibold">{formatPlanDate(data.purchasedAt)}</dd>
               </div>
-              {selectedPlan?.featureKeys?.length ? (
+              {selectedPlan ? (
                 <div className="border-t border-[#F1F3F5] pt-3 dark:border-[#1E293B]">
                   <dt className="mb-2 text-[#6B7280]">Included in this plan</dt>
                   <dd>
+                    <p className="mb-2 font-medium">{teamMemberLabel(selectedPlan.limits.teamMembers)}</p>
                     <ul className="space-y-1.5">
-                      {selectedPlan.featureKeys.map((key) => (
-                        <li key={key} className="flex items-start gap-2 font-medium">
+                      {planChecklist(selectedPlan).map((line) => (
+                        <li key={line} className="flex items-start gap-2 font-medium">
                           <Check size={14} className="mt-0.5 shrink-0 text-[#2563EB]" />
-                          {featureLabel(key)}
+                          {line}
                         </li>
                       ))}
                     </ul>

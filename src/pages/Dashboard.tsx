@@ -36,6 +36,7 @@ import { DashboardCalendarPanel } from "@/components/dashboard/DashboardCalendar
 import { runClockInWithLocation } from "@/lib/clock-in-with-location";
 import { toast } from "sonner";
 import { useTaskStatusLabels } from "@/hooks/useTaskStatusLabels";
+import { hasPlanFeature } from "@/lib/plan-features";
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -62,6 +63,9 @@ export default function Dashboard() {
 function EmployeeDashboard() {
   const { user } = useAuth();
   const isManager = String(user?.role ?? "").toLowerCase() === "manager";
+  const showTasks = hasPlanFeature(user, "tasks");
+  const showTime = hasPlanFeature(user, "time_tracking");
+  const showLeave = hasPlanFeature(user, "leave");
   const statusLabels = useTaskStatusLabels();
 
   const { data: stats } = trpc.dashboard.getStats.useQuery(undefined, {
@@ -142,34 +146,42 @@ function EmployeeDashboard() {
   };
 
   const kpiCards = [
-    {
-      title: "Ongoing Tasks",
-      value: stats?.ongoingTasks ?? 0,
-      icon: Clock,
-      iconColor: "#F59E0B",
-      badge: { text: statusLabels.todo, bg: "#FEF3C7", color: "#D97706" },
-      subtext: "Tasks awaiting action",
-      mono: false,
-    },
-    ...(isManager ? [completedTasksCard] : []),
-    {
-      title: "Hours Logged Today",
-      value: formatPreciseWorkedClock(todayTrackedSeconds),
-      icon: Timer,
-      iconColor: "#3B82F6",
-      badge: { text: "Today", bg: "#DBEAFE", color: "#2563EB" },
-      subtext: "Time logged today",
-      mono: true,
-    },
-    {
-      title: "Hours Logged This Week",
-      value: formatPreciseWorkedClock(weekTrackedSeconds),
-      icon: Timer,
-      iconColor: "#0EA5E9",
-      badge: { text: "This week", bg: "#E0F2FE", color: "#0284C7" },
-      subtext: "Time logged this week",
-      mono: true,
-    },
+    ...(showTasks
+      ? [
+          {
+            title: "Ongoing Tasks",
+            value: stats?.ongoingTasks ?? 0,
+            icon: Clock,
+            iconColor: "#F59E0B",
+            badge: { text: statusLabels.todo, bg: "#FEF3C7", color: "#D97706" },
+            subtext: "Tasks awaiting action",
+            mono: false,
+          },
+          ...(isManager ? [completedTasksCard] : []),
+        ]
+      : []),
+    ...(showTime
+      ? [
+          {
+            title: "Hours Logged Today",
+            value: formatPreciseWorkedClock(todayTrackedSeconds),
+            icon: Timer,
+            iconColor: "#3B82F6",
+            badge: { text: "Today", bg: "#DBEAFE", color: "#2563EB" },
+            subtext: "Time logged today",
+            mono: true,
+          },
+          {
+            title: "Hours Logged This Week",
+            value: formatPreciseWorkedClock(weekTrackedSeconds),
+            icon: Timer,
+            iconColor: "#0EA5E9",
+            badge: { text: "This week", bg: "#E0F2FE", color: "#0284C7" },
+            subtext: "Time logged this week",
+            mono: true,
+          },
+        ]
+      : []),
   ];
 
   const containerVariants = {
@@ -220,6 +232,7 @@ function EmployeeDashboard() {
           </p>
         </div>
 
+        {showTime ? (
         <div className="bg-white border border-gray-200 rounded-xl px-5 py-3 flex flex-col sm:flex-row items-start sm:items-center gap-3 shadow-sm w-full sm:w-auto">
           <div className="text-left sm:text-right w-full sm:w-auto">
             <div className="text-xs text-gray-500">
@@ -273,10 +286,12 @@ function EmployeeDashboard() {
             )}
           </button>
         </div>
+        ) : null}
       </motion.div>
 
       <TodayBirthdaysBanner birthdays={leaveSummary?.upcomingBirthdays ?? []} />
 
+      {kpiCards.length > 0 ? (
       <motion.div
         variants={itemVariants}
         className={`grid grid-cols-1 sm:grid-cols-2 gap-5 ${
@@ -311,18 +326,25 @@ function EmployeeDashboard() {
           </div>
         ))}
       </motion.div>
+      ) : null}
 
+      {showTasks || showTime ? (
       <motion.div
         variants={itemVariants}
         className="grid grid-cols-1 xl:grid-cols-3 gap-5 items-stretch"
       >
-        <div className="xl:col-span-2 min-w-0 h-full">
+        {showTasks ? (
+        <div className={showTime ? "xl:col-span-2 min-w-0 h-full" : "xl:col-span-3 min-w-0 h-full"}>
           <DashboardMyTasksPanel />
         </div>
-        <div className="min-w-0 h-full">
+        ) : null}
+        {showTime ? (
+        <div className={showTasks ? "min-w-0 h-full" : "xl:col-span-3 min-w-0 h-full"}>
           <DashboardCurrentTimerCard />
         </div>
+        ) : null}
       </motion.div>
+      ) : null}
 
       <motion.div variants={itemVariants}>
         <DashboardInsightCards
@@ -331,6 +353,7 @@ function EmployeeDashboard() {
         />
       </motion.div>
 
+      {showLeave ? (
       <motion.div
         variants={itemVariants}
         className="grid grid-cols-1 xl:grid-cols-3 gap-5 items-stretch"
@@ -351,6 +374,7 @@ function EmployeeDashboard() {
           />
         </div>
       </motion.div>
+      ) : null}
 
       {isManager ? (
         <motion.div variants={itemVariants}>

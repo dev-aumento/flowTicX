@@ -26,6 +26,7 @@ import { Collections } from "@db/mongo/collections";
 import type { ProjectDoc, ProjectMemberDoc, TaskDoc, UserDoc } from "@db/mongo/types";
 import { ensureSchema } from "./lib/migrate";
 import { belongsToUserOrg, orgFilter, requireOrganizationId, resolveClientWorkspace } from "./lib/tenant";
+import { assertCanAddProject } from "./lib/plan-capacity";
 import {
   attachClientToMatchedProject,
   filterClientDuplicateProjects,
@@ -442,6 +443,8 @@ export const projectRouter = createRouter({
           }
         }
       }
+
+      await assertCanAddProject(organizationId);
 
       const project = await insertDoc<ProjectDoc>(Collections.projects, {
         name: input.name,

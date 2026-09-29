@@ -157,6 +157,17 @@ export type SubscriptionPlanDoc = {
   durationDays: number;
   featureKeys: string[];
   sortOrder: number;
+  /** Project, seat, and storage caps. Null on a field means unlimited. */
+  limits?: {
+    projects: number | null;
+    teamMembers: number | null;
+    storageGb: number | null;
+  } | null;
+  highlightKeys?: string[] | null;
+  badge?: string | null;
+  ctaLabel?: string | null;
+  storageLabel?: string | null;
+  entitlementsConfigured?: boolean | null;
   createdAt: Date;
   updatedAt: Date;
 };

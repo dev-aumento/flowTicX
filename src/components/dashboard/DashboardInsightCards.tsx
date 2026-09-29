@@ -1,5 +1,7 @@
 import { useMemo } from "react";
 import { useNavigate } from "react-router";
+import { useAuth } from "@/hooks/useAuth";
+import { hasPlanFeature } from "@/lib/plan-features";
 import { ArrowRight, FolderKanban, Loader2, Megaphone, Umbrella } from "lucide-react";
 import { trpc } from "@/providers/trpc";
 import { MonthAttendanceCard } from "@/components/dashboard/MonthAttendanceCard";
@@ -38,6 +40,10 @@ export function DashboardInsightCards({
   attendanceLoading,
 }: DashboardInsightCardsProps) {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const showAttendance = hasPlanFeature(user, "attendance");
+  const showProjects = hasPlanFeature(user, "projects");
+  const showLeave = hasPlanFeature(user, "leave");
   const todayKey = workZoneDateKey(new Date());
   const year = workZoneDateParts(new Date()).year;
 
@@ -85,6 +91,7 @@ export function DashboardInsightCards({
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 items-stretch">
+      {showAttendance ? (
       <div className="min-w-0">
         <MonthAttendanceCard
           data={attendance}
@@ -92,8 +99,9 @@ export function DashboardInsightCards({
           compact
         />
       </div>
+      ) : null}
 
-      {/* My Projects */}
+      {showProjects ? (
       <div className="bg-white border border-gray-200 rounded-xl p-3.5 flex flex-col min-h-0 min-w-0">
         <div className="flex items-center justify-between gap-2 mb-2">
           <h2 className="text-sm font-semibold text-[#1F2937] flex items-center gap-2 min-w-0">
@@ -152,8 +160,9 @@ export function DashboardInsightCards({
           </ul>
         )}
       </div>
+      ) : null}
 
-      {/* Leave Balance */}
+      {showLeave ? (
       <div className="bg-white border border-gray-200 rounded-xl p-3.5 flex flex-col min-h-0 min-w-0">
         <div className="flex items-center justify-between gap-2 mb-2">
           <h2 className="text-sm font-semibold text-[#1F2937] flex items-center gap-2 min-w-0">
@@ -189,6 +198,7 @@ export function DashboardInsightCards({
           </ul>
         )}
       </div>
+      ) : null}
 
       {/* Announcements — upcoming holidays */}
       <div className="bg-white border border-gray-200 rounded-xl p-3.5 flex flex-col min-h-0 min-w-0">

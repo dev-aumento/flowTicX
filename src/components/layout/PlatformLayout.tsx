@@ -74,11 +74,7 @@ function PlatformSidebar({
   onNavigate?: () => void;
 }) {
   return (
-    <div className="relative flex h-full min-h-0 flex-col bg-gradient-to-b from-[#1e3a5f] via-[#2563EB] to-[#1e40af] dark:bg-none dark:bg-[#0a0e14] sidebar-chrome">
-      <div
-        className="pointer-events-none absolute inset-0 opacity-25 bg-[radial-gradient(circle_at_top,_white,_transparent_55%)] dark:opacity-30 dark:bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.12),_transparent_50%)]"
-        aria-hidden
-      />
+    <div className="relative flex h-full min-h-0 flex-col sidebar-chrome">
       <div className="relative px-5 pt-5 pb-4">
         <PlatformBrand onNavigate={onNavigate} />
       </div>

@@ -1,4 +1,9 @@
 import type { SubscriptionPlan, SubscriptionStatus } from "@db/mongo/types";
+import {
+  defaultEntitlement,
+  deriveFeatureKeys,
+  type PlanLimits,
+} from "@/lib/plan-entitlements";
 
 export type PlatformUser = {
   role?: string | null;
@@ -41,57 +46,45 @@ export type PlatformPlan = {
   durationDays: number;
   featureKeys: string[];
   sortOrder: number;
+  limits: PlanLimits;
+  highlightKeys: string[];
+  badge: string | null;
+  ctaLabel: string;
+  storageLabel: string | null;
+  entitlementsConfigured: boolean;
 };
 
+function catalogPlan(
+  slug: string,
+  name: string,
+  amount: number,
+  description: string,
+  sortOrder: number,
+): PlatformPlan {
+  const entitlement = defaultEntitlement(slug);
+  return {
+    slug,
+    name,
+    amount,
+    description,
+    durationDays: 30,
+    featureKeys: deriveFeatureKeys(entitlement.highlightKeys, entitlement.limits),
+    sortOrder,
+    limits: entitlement.limits,
+    highlightKeys: entitlement.highlightKeys,
+    badge: entitlement.badge,
+    ctaLabel: entitlement.ctaLabel,
+    storageLabel: entitlement.storageLabel,
+    entitlementsConfigured: true,
+  };
+}
+
 export const DEFAULT_PLATFORM_PLANS: PlatformPlan[] = [
-  {
-    slug: "trial",
-    name: "Trial",
-    amount: 0,
-    description: "Evaluate Aaso with a limited workspace.",
-    durationDays: 14,
-    featureKeys: ["projects", "tasks", "files"],
-    sortOrder: 1,
-  },
-  {
-    slug: "starter",
-    name: "Starter",
-    amount: 2_999,
-    description: "For small teams getting work organized.",
-    durationDays: 365,
-    featureKeys: ["projects", "tasks", "time_tracking", "invoices", "customers", "files"],
-    sortOrder: 2,
-  },
-  {
-    slug: "growth",
-    name: "Growth",
-    amount: 6_999,
-    description: "For growing agencies and delivery teams.",
-    durationDays: 365,
-    featureKeys: [
-      "projects",
-      "tasks",
-      "time_tracking",
-      "invoices",
-      "customers",
-      "employees",
-      "leave",
-      "attendance",
-      "client_portal",
-      "files",
-      "meetings",
-    ],
-    sortOrder: 3,
-  },
-  {
-    slug: "enterprise",
-    name: "Enterprise",
-    amount: 14_999,
-    description: "Full platform access with every module.",
-    durationDays: 365,
-    featureKeys: PLAN_FEATURE_CATALOG.map((feature) => feature.key),
-    sortOrder: 4,
-  },
+  catalogPlan("trial", "Free", 0, "For freelancers and small teams exploring AASO", 1),
+  catalogPlan("starter", "Starter", 2_783, "For boutique service agencies and growing consultancies", 2),
+  catalogPlan("growth", "Growth", 5_662, "For scaling firms requiring pipeline automation and client billing", 3),
+  catalogPlan("business", "Business", 9_501, "For established multi-team agencies and operational leaders", 4),
+  catalogPlan("enterprise", "Enterprise", 19_098, "For high-throughput organizations with strict security needs", 5),
 ];
 
 /** @deprecated Prefer catalog amount from saved plans. */
@@ -140,7 +133,7 @@ export function addPlanDuration(start: Date, plan: SubscriptionPlan | string, du
   const days =
     durationDays ??
     DEFAULT_PLATFORM_PLANS.find((item) => item.slug === plan)?.durationDays ??
-    (plan === "trial" ? 14 : 365);
+    30;
   // Calendar units so a monthly plan is +1 month and an annual plan is +1 year,
   // not a fixed 30/365-day offset that drifts from the start date.
   if (days % 365 === 0) return addCalendarMonths(start, (days / 365) * 12);
@@ -175,6 +168,19 @@ export function fromDateInputValue(value: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return null;
   const [year, month, day] = trimmed.split("-").map(Number);
   return new Date(year, month - 1, day);
+}
+
+export function planPriceSuffix(days: number) {
+  if (!Number.isFinite(days) || days <= 0) return "";
+  if (days % 365 === 0) {
+    const years = days / 365;
+    return years === 1 ? "/ year" : `/ ${years} years`;
+  }
+  if (days % 30 === 0) {
+    const months = days / 30;
+    return months === 1 ? "/ month" : `/ ${months} months`;
+  }
+  return `/ ${days} days`;
 }
 
 export function formatPlanDuration(days: number) {

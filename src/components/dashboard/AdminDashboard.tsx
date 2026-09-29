@@ -31,6 +31,7 @@ import {
 } from "@/lib/timezone";
 import { formatHoursMinutes } from "@/lib/work-hours-policy";
 import { formatMoney, currencySymbol } from "@/lib/invoice-store";
+import { hasPlanFeature } from "@/lib/plan-features";
 import { WorkforceKpiCards } from "@/components/dashboard/WorkforceKpiCards";
 import { DashboardCalendarEventsBlocks } from "@/components/dashboard/DashboardCalendarPanel";
 import { UpcomingBirthdaysPanel } from "@/components/dashboard/UpcomingBirthdaysPanel";
@@ -442,7 +443,31 @@ export function AdminDashboard() {
     }
   }, [sections]);
 
-  const show = (id: DashboardSectionId) => sections[id] !== false;
+  const planAllowsSection = (id: DashboardSectionId) => {
+    if (id === "projectOverview") return hasPlanFeature(user, "projects");
+    if (id === "myTasks") return hasPlanFeature(user, "tasks");
+    if (id === "workforceKpis" || id === "workOverview" || id === "recentJoiners") {
+      return hasPlanFeature(user, "employees");
+    }
+    if (id === "monthMetrics") {
+      return (
+        hasPlanFeature(user, "time_tracking") ||
+        hasPlanFeature(user, "finance") ||
+        hasPlanFeature(user, "invoices")
+      );
+    }
+    if (id === "aiBrief") {
+      return (
+        hasPlanFeature(user, "projects") ||
+        hasPlanFeature(user, "invoices") ||
+        hasPlanFeature(user, "time_tracking") ||
+        hasPlanFeature(user, "leave")
+      );
+    }
+    return true;
+  };
+
+  const show = (id: DashboardSectionId) => planAllowsSection(id) && sections[id] !== false;
 
   function applyPreset(next: DatePresetId) {
     if (next === "custom") {
@@ -739,7 +764,7 @@ export function AdminDashboard() {
                 </p>
               </div>
               <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                {SECTION_LABELS.map((section) => (
+                {SECTION_LABELS.filter((section) => planAllowsSection(section.id)).map((section) => (
                   <label
                     key={section.id}
                     className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-gray-50 cursor-pointer dark:hover:bg-white/5"

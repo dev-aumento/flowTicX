@@ -1,6 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import type { OrganizationDoc, SafeUser, UserDoc } from "@db/mongo/types";
 import { addPlanDuration, DEFAULT_PLATFORM_PLANS, PLAN_FEATURE_CATALOG } from "@/lib/platform-admin";
+import { defaultEntitlement, type PlanLimits } from "@/lib/plan-entitlements";
 import { findOrganizationById } from "./tenant";
 import { findPlatformPlan } from "./platform-plans";
 import { hasMongoConfigured } from "../queries/mongo";
@@ -23,6 +24,8 @@ export type OrgPlanAccess = {
   planName: string | null;
   planStatus: string | null;
   planFeatures: string[] | null;
+  /** Null means the workspace is not capped (platform). */
+  planLimits: PlanLimits | null;
 };
 
 const ALL_FEATURE_KEYS = PLAN_FEATURE_CATALOG.map((feature) => feature.key);
@@ -41,7 +44,7 @@ export async function resolveOrgPlanAccess(
   org: Pick<OrganizationDoc, "workspaceType" | "plan" | "planStatus"> | null | undefined,
 ): Promise<OrgPlanAccess> {
   if (!org || org.workspaceType === "platform") {
-    return { plan: null, planName: null, planStatus: null, planFeatures: ALL_FEATURE_KEYS };
+    return { plan: null, planName: null, planStatus: null, planFeatures: ALL_FEATURE_KEYS, planLimits: null };
   }
 
   const slug = org.plan ?? "trial";
@@ -51,6 +54,7 @@ export async function resolveOrgPlanAccess(
     planName: catalog?.name ?? slug,
     planStatus: org.planStatus ?? (slug === "trial" ? "trial" : "unpaid"),
     planFeatures: catalog?.featureKeys ?? fallbackFeatureKeys(slug),
+    planLimits: catalog?.limits ?? defaultEntitlement(slug).limits,
   };
 }
 

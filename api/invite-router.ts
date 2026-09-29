@@ -28,6 +28,7 @@ import {
   INVITED_CLIENT_PERMISSIONS,
   toSessionUser,
 } from "./lib/client-workspace";
+import { assertCanAddMember, assertCanInviteMember } from "./lib/plan-capacity";
 import { getEmployeeDefaultPermissions } from "./lib/employee-defaults";
 import { ensureCustomerFromClientUser } from "./lib/sync-customers-from-clients";
 
@@ -140,6 +141,7 @@ export const inviteRouter = createRouter({
       }
 
       await ensureSchema();
+      await assertCanInviteMember(organizationId);
 
       const existingUser = await findUserByEmail(email);
       if (existingUser) {
@@ -373,6 +375,8 @@ export const inviteRouter = createRouter({
           message: "This invite is not linked to an organization",
         });
       }
+
+      await assertCanAddMember(invite.organizationId);
 
       const email = input.email.toLowerCase();
       if (invite.email && invite.email.toLowerCase() !== email) {

@@ -13,13 +13,23 @@ import { z } from "zod";
 
 const planSchema = z.string().min(1).max(64);
 const statusSchema = z.enum(["trial", "paid", "unpaid", "cancelled"]);
+const limitField = z.number().int().min(0).max(1_000_000).nullable();
+
 const planInputSchema = z.object({
   id: z.number().int().positive().optional(),
   name: z.string().min(1).max(80),
   amount: z.number().min(0).max(10_000_000),
   description: z.string().max(400),
   durationDays: z.number().int().min(1).max(3650),
-  featureKeys: z.array(z.string().min(1).max(60)).max(40),
+  limits: z.object({
+    projects: limitField,
+    teamMembers: limitField,
+    storageGb: limitField,
+  }),
+  highlightKeys: z.array(z.string().min(1).max(60)).max(80),
+  badge: z.string().max(40).nullable(),
+  ctaLabel: z.string().min(1).max(40),
+  storageLabel: z.string().max(80).nullable(),
 });
 
 type CustomerRow = {
