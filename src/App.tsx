@@ -33,6 +33,7 @@ import AdminDepartments from './pages/admin/Departments'
 import AdminAllTasks from './pages/admin/AllTasks'
 import AdminClientTasks from './pages/admin/ClientTasks'
 import AdminPermissions from './pages/admin/Permissions'
+import AdminManageData from './pages/admin/ManageData'
 import AdminPricing from './pages/admin/Pricing'
 import AdminInvoices from './pages/admin/Invoices'
 import AdminCustomers from './pages/admin/Customers'
@@ -424,6 +425,11 @@ export default function App() {
           <Route path="/admin/permissions" element={
             <PermissionRoute path="/admin/permissions">
               <AdminPermissions />
+            </PermissionRoute>
+          } />
+          <Route path="/admin/manage-data" element={
+            <PermissionRoute path="/admin/manage-data">
+              <AdminManageData />
             </PermissionRoute>
           } />
           <Route path="/admin/pricing" element={

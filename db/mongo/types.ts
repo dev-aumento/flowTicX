@@ -57,6 +57,27 @@ export type NotificationType =
   | "invoice_created"
   | "invoice_updated";
 
+export type DataTransferAction = "import" | "export";
+export type DataTransferDataset = "projects" | "tasks" | "hours";
+export type DataTransferFormat = "csv" | "pdf" | "docx";
+
+export type DataTransferLogDoc = {
+  id: number;
+  organizationId: number;
+  userId: number;
+  userName: string;
+  action: DataTransferAction;
+  dataset: DataTransferDataset;
+  format: DataTransferFormat;
+  fileName: string;
+  rowCount: number;
+  createdCount: number;
+  updatedCount: number;
+  skippedCount: number;
+  message: string;
+  createdAt: Date;
+};
+
 export type LeaveType = "paid" | "sick" | "unpaid" | "half" | "wfh";
 export type LeaveStatus = "pending" | "approved" | "rejected" | "cancelled";
 

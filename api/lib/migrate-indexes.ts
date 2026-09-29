@@ -244,6 +244,13 @@ export async function ensureIndexes() {
       indexes: [{ key: { id: 1 }, unique: true }, { key: { userId: 1 } }],
     },
     {
+      name: Collections.dataTransferLogs,
+      indexes: [
+        { key: { id: 1 }, unique: true },
+        { key: { organizationId: 1, createdAt: -1 } },
+      ],
+    },
+    {
       name: Collections.workSessions,
       indexes: [{ key: { id: 1 }, unique: true }, { key: { userId: 1, active: 1 } }],
     },

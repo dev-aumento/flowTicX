@@ -19,6 +19,7 @@ export const Collections = {
   formerEmployees: "former_employees",
   formerEmployeeDocuments: "former_employee_documents",
   notifications: "notifications",
+  dataTransferLogs: "data_transfer_logs",
   workSessions: "work_sessions",
   workBreaks: "work_breaks",
   timeApprovalRequests: "time_approval_requests",

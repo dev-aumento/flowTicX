@@ -20,6 +20,7 @@ import { dashboardReminderRouter } from "./dashboard-reminder-router";
 import { organizationRouter } from "./organization-router";
 import { platformRouter } from "./platform-router";
 import { subscriptionRouter } from "./subscription-router";
+import { dataTransferRouter } from "./data-transfer-router";
 import { createRouter, publicQuery } from "./middleware";
 
 export const appRouter = createRouter({
@@ -45,6 +46,7 @@ export const appRouter = createRouter({
   finance: financeRouter,
   organization: organizationRouter,
   subscription: subscriptionRouter,
+  dataTransfer: dataTransferRouter,
   platform: platformRouter,
 });
 

@@ -21,6 +21,7 @@ import {
   Settings,
   Users,
   Shield,
+  Database,
   ChevronLeft,
   ChevronRight,
   LogOut,
@@ -212,6 +213,12 @@ function SidebarPanel({
           section: "SYSTEM",
         },
         {
+          path: "/admin/manage-data",
+          icon: Database,
+          label: "Manage data",
+          section: "SYSTEM",
+        },
+        {
           path: "/locations",
           icon: MapPin,
           label: "Location",
@@ -242,6 +249,7 @@ function SidebarPanel({
       },
       { path: "/admin/employees", icon: Users, label: "Employees" },
       { path: "/admin/permissions", icon: Shield, label: "Permissions" },
+      { path: "/admin/manage-data", icon: Database, label: "Manage data" },
       ...(isAdmin
         ? [
             { path: "/admin/invoices", icon: FileText, label: "Invoice" },

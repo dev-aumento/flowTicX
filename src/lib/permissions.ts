@@ -87,6 +87,7 @@ function isClientRestrictedPath(path: string): boolean {
   if (path === "/time-tracking" || path.startsWith("/time-tracking")) return true;
   if (path === "/analytics" || path.startsWith("/analytics")) return true;
   if (path === "/admin/permissions" || path.startsWith("/admin/permissions")) return true;
+  if (path === "/admin/manage-data" || path.startsWith("/admin/manage-data")) return true;
   if (path === "/admin/customers" || path.startsWith("/admin/customers")) return true;
   if (path === "/admin/reports" || path.startsWith("/admin/reports")) return true;
   if (path === "/admin/pricing" || path.startsWith("/admin/pricing")) return true;
@@ -106,6 +107,13 @@ export function canAccessRoute(user: PermissionUser | null | undefined, path: st
 
   if (path === "/admin/pricing" || path.startsWith("/admin/pricing")) {
     return String(user?.role ?? "").toLowerCase() === "admin";
+  }
+
+  if (path === "/admin/manage-data" || path.startsWith("/admin/manage-data")) {
+    if (isClientPortalUser(user) || isFinanceRoleOnly(user) || isHrDepartmentUser(user)) return false;
+    const role = String(user?.role ?? "").toLowerCase();
+    if (role === "admin" || role === "manager") return true;
+    return hasAnyPermission(user, ["projects.manage", "permissions.manage"]);
   }
 
   if (!canAccessPlanRoute(user, path)) {
