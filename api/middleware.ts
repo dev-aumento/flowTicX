@@ -4,6 +4,7 @@ import superjson from "superjson";
 import type { TrpcContext } from "./context";
 import { hasPermission, canViewDepartments } from "./lib/permissions";
 import { assertActiveSubscription } from "./lib/subscription-access";
+import { runWithRequestOrigin } from "./lib/request-origin";
 
 const t = initTRPC.context<TrpcContext>().create({
   transformer: superjson,
@@ -27,7 +28,7 @@ const requireAuth = t.middleware(async (opts) => {
       resHeaders: ctx.resHeaders,
     });
 
-    return next({ ctx: { ...ctx, user: ctx.user } });
+    return runWithRequestOrigin(ctx.req, () => next({ ctx: { ...ctx, user: ctx.user } }));
 });
 
 function requireRole(role: string) {

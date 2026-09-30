@@ -1,9 +1,20 @@
 import { Collections } from "@db/mongo/collections";
-import type { NotificationDoc, ProjectDoc, SafeUser, TaskDoc, UserDoc } from "@db/mongo/types";
+import type { NotificationDoc, ProjectDoc, SafeUser, TaskDoc, TaskStatus, UserDoc } from "@db/mongo/types";
+import { formatDueLabel } from "@/lib/task-deadline";
+import { formatWorkZoneDateTime } from "@/lib/timezone";
+import { getAvatarColor, getInitials } from "@/lib/utils";
 import { findById, getCollection } from "../queries/connection";
 import { isMailConfigured, sendMail } from "./mail";
+import { publicAppOrigin } from "./request-origin";
 
 export type TaskEmailKind = "assign" | "status" | "overdue" | "comment" | "mention";
+
+const STATUS_LABELS: Record<TaskStatus, string> = {
+  todo: "Not started",
+  in_progress: "In Progress",
+  review: "Pause",
+  done: "Complete",
+};
 
 export function taskEmailKind(
   type: NotificationDoc["type"],
@@ -25,20 +36,38 @@ function escapeHtml(value: string) {
     .replace(/"/g, "&quot;");
 }
 
-function taskUrl(taskId: number, projectName: string | null, activityId: number | null) {
-  const base = process.env.APP_PUBLIC_URL?.trim().replace(/\/$/, "");
-  if (!base) return null;
+function plainText(value: string | null | undefined) {
+  return String(value ?? "")
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/«[^»]*»/g, " ")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
+function clip(value: string, max: number) {
+  if (value.length <= max) return value;
+  return `${value.slice(0, max - 1).trim()}…`;
+}
+
+function taskPath(taskId: number, projectName: string | null, activityId: number | null) {
   const slug = (projectName ?? "")
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 80);
-  const path = slug
-    ? `/projects/${slug}/tasks/task=${taskId}/`
-    : `/tasks/task=${taskId}/`;
+  const path = slug ? `/projects/${slug}/tasks/task=${taskId}/` : `/tasks/task=${taskId}/`;
   const query = activityId != null && activityId > 0 ? `?activity=${activityId}` : "";
-  return `${base}${path}${query}`;
+  return `${path}${query}`;
 }
 
 function subjectFor(kind: TaskEmailKind, actorName: string, taskTitle: string) {
@@ -49,8 +78,202 @@ function subjectFor(kind: TaskEmailKind, actorName: string, taskTitle: string) {
   return `${actorName} commented on “${taskTitle}”`;
 }
 
+function headlineFor(kind: TaskEmailKind, actorName: string) {
+  if (kind === "assign") return `${actorName} assigned this task to you`;
+  if (kind === "status") return `${actorName} updated the task status`;
+  if (kind === "overdue") return "This task is overdue";
+  if (kind === "mention") return `${actorName} mentioned you`;
+  return `${actorName} added a comment`;
+}
+
+function commentBody(kind: TaskEmailKind, message: string) {
+  if (kind !== "comment" && kind !== "mention") return "";
+  const text = plainText(message);
+  if (kind === "mention") {
+    const quoted = text.match(/":\s*([\s\S]+)$/);
+    if (quoted?.[1]) return quoted[1].trim();
+  }
+  const splitAt = text.indexOf(": ");
+  if (splitAt >= 0) return text.slice(splitAt + 2).trim();
+  return text;
+}
+
 function isActiveUser(status: string | null | undefined) {
   return String(status ?? "").toLowerCase() === "active";
+}
+
+function labelize(value: string) {
+  return value
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+type AvatarImage = {
+  html: string;
+  attachment?: {
+    filename: string;
+    content: Buffer;
+    cid: string;
+    contentType: string;
+  };
+};
+
+function avatarHtml(name: string, avatar: string | null, origin: string, size: number): AvatarImage {
+  const initials = escapeHtml(getInitials(name));
+  const color = getAvatarColor(name || "?");
+  const fallback = `<table cellpadding="0" cellspacing="0" role="presentation"><tr><td width="${size}" height="${size}" align="center" valign="middle" bgcolor="${color}" style="width:${size}px;height:${size}px;border-radius:${size / 2}px;color:#ffffff;font-family:Arial,sans-serif;font-size:${Math.round(size * 0.36)}px;font-weight:700;line-height:${size}px;">${initials}</td></tr></table>`;
+
+  if (!avatar?.trim()) return { html: fallback };
+
+  if (avatar.startsWith("https://") || avatar.startsWith("http://")) {
+    return {
+      html: `<img src="${escapeHtml(avatar)}" width="${size}" height="${size}" alt="${initials}" style="display:block;width:${size}px;height:${size}px;border-radius:${size / 2}px;object-fit:cover;" />`,
+    };
+  }
+
+  if (avatar.startsWith("/") && origin) {
+    return {
+      html: `<img src="${escapeHtml(`${origin}${avatar}`)}" width="${size}" height="${size}" alt="${initials}" style="display:block;width:${size}px;height:${size}px;border-radius:${size / 2}px;object-fit:cover;" />`,
+    };
+  }
+
+  const dataUrl = avatar.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,([A-Za-z0-9+/=\s]+)$/);
+  if (!dataUrl) return { html: fallback };
+  const cid = "actor-avatar";
+  return {
+    html: `<img src="cid:${cid}" width="${size}" height="${size}" alt="${initials}" style="display:block;width:${size}px;height:${size}px;border-radius:${size / 2}px;object-fit:cover;" />`,
+    attachment: {
+      filename: "avatar",
+      content: Buffer.from(dataUrl[2].replace(/\s/g, ""), "base64"),
+      cid,
+      contentType: dataUrl[1],
+    },
+  };
+}
+
+function detailRow(label: string, value: string) {
+  if (!value) return "";
+  return `<tr>
+    <td style="padding:4px 16px 4px 0;font-family:Arial,sans-serif;font-size:13px;line-height:20px;color:#6b7280;white-space:nowrap;vertical-align:top;">${escapeHtml(label)}</td>
+    <td style="padding:4px 0;font-family:Arial,sans-serif;font-size:13px;line-height:20px;color:#111827;vertical-align:top;">${escapeHtml(value)}</td>
+  </tr>`;
+}
+
+function buildEmail(input: {
+  actorName: string;
+  avatar: AvatarImage;
+  headline: string;
+  taskTitle: string;
+  projectName: string;
+  status: string;
+  priority: string;
+  due: string;
+  description: string;
+  comment: string;
+  when: string;
+  link: string;
+  logoUrl: string;
+}) {
+  const button = input.link
+    ? `<a href="${escapeHtml(input.link)}" style="display:inline-block;background:#2563EB;color:#ffffff;font-family:Arial,sans-serif;font-size:14px;font-weight:700;line-height:20px;text-decoration:none;padding:10px 16px;border-radius:6px;">View in AASO</a>`
+    : "";
+  const footerLink = input.link
+    ? `<tr><td style="padding:14px 20px 16px;border-top:1px solid #e5e7eb;font-family:Arial,sans-serif;font-size:14px;"><a href="${escapeHtml(input.link)}" style="color:#2563EB;text-decoration:none;">View in AASO</a></td></tr>`
+    : "";
+  const comment = input.comment
+    ? `<p style="margin:14px 0 0;font-family:Arial,sans-serif;font-size:14px;line-height:22px;color:#1d4ed8;">${escapeHtml(input.comment)}</p>`
+    : "";
+  const logo = input.logoUrl
+    ? `<img src="${escapeHtml(input.logoUrl)}" width="28" height="28" alt="" style="display:inline-block;vertical-align:middle;border:0;" />`
+    : "";
+
+  const html = `<!DOCTYPE html>
+<html>
+<body style="margin:0;padding:0;background:#f6f7f9;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f6f7f9;">
+    <tr>
+      <td align="center" style="padding:28px 12px;">
+        <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="width:100%;max-width:560px;">
+          <tr>
+            <td style="padding:0 4px 18px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td valign="middle" style="font-family:Georgia,Times New Roman,serif;font-size:28px;line-height:32px;font-weight:700;color:#111827;">
+                    ${logo}<span style="display:inline-block;vertical-align:middle;padding-left:8px;">aaso</span>
+                  </td>
+                  <td align="right" valign="middle">${input.avatar.html}</td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:0 4px 4px;font-family:Arial,sans-serif;font-size:16px;line-height:24px;color:#111827;">Your unread notifications</td>
+          </tr>
+          <tr>
+            <td style="padding:0 4px 2px;font-family:Arial,sans-serif;font-size:22px;line-height:28px;font-weight:700;color:#111827;">${escapeHtml(input.headline)}</td>
+          </tr>
+          <tr>
+            <td style="padding:0 4px 16px;font-family:Arial,sans-serif;font-size:14px;line-height:20px;color:#6b7280;">${escapeHtml(input.projectName || "AASO")}</td>
+          </tr>
+          ${button ? `<tr><td style="padding:0 4px 22px;">${button}</td></tr>` : ""}
+          <tr>
+            <td>
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;">
+                <tr>
+                  <td style="padding:18px 20px 8px;">
+                    <table role="presentation" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td valign="top" style="padding-right:12px;">${input.avatar.html}</td>
+                        <td valign="middle" style="font-family:Arial,sans-serif;font-size:16px;line-height:22px;font-weight:700;color:#111827;">${escapeHtml(input.headline)}</td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:6px 20px 4px;font-family:Arial,sans-serif;font-size:15px;line-height:22px;font-weight:700;color:#111827;">${escapeHtml(input.taskTitle)}</td>
+                </tr>
+                <tr>
+                  <td style="padding:2px 20px 8px;font-family:Arial,sans-serif;font-size:13px;line-height:18px;color:#6b7280;">${escapeHtml(input.actorName)} · ${escapeHtml(input.when)}</td>
+                </tr>
+                <tr>
+                  <td style="padding:4px 20px 8px;">
+                    <table role="presentation" cellpadding="0" cellspacing="0">
+                      ${detailRow("Status", input.status)}
+                      ${detailRow("Priority", input.priority)}
+                      ${detailRow("Due", input.due)}
+                      ${detailRow("Project", input.projectName)}
+                      ${input.description ? detailRow("Description", input.description) : ""}
+                    </table>
+                    ${comment}
+                  </td>
+                </tr>
+                ${footerLink}
+              </table>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+  const text = [
+    input.headline,
+    input.taskTitle,
+    input.projectName ? `Project: ${input.projectName}` : "",
+    input.status ? `Status: ${input.status}` : "",
+    input.priority ? `Priority: ${input.priority}` : "",
+    input.due ? `Due: ${input.due}` : "",
+    input.description ? `Description: ${input.description}` : "",
+    input.comment ? input.comment : "",
+    `${input.actorName} · ${input.when}`,
+    input.link ? `View in AASO: ${input.link}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return { html, text };
 }
 
 export async function sendTaskNotificationEmails(input: {
@@ -61,6 +284,7 @@ export async function sendTaskNotificationEmails(input: {
   message: string;
   activityId?: number | null;
 }) {
+  const origin = publicAppOrigin();
   if (!isMailConfigured() || input.userIds.length === 0) return;
 
   const usersCol = await getCollection<UserDoc>(Collections.users);
@@ -77,16 +301,39 @@ export async function sendTaskNotificationEmails(input: {
   const taskTitle = task?.title?.trim() || "a task";
   const project =
     task?.projectId != null ? await findById<ProjectDoc>(Collections.projects, task.projectId) : null;
-  const actorName = input.actor?.name?.trim() || input.actor?.email?.trim() || "Someone";
+  const projectName = project?.name?.trim() || "";
+
+  let actorName = input.actor?.name?.trim() || input.actor?.email?.trim() || "Someone";
+  let actorAvatar = input.actor?.avatar ?? null;
+  if (input.actor?.id) {
+    const actorUser = await findById<UserDoc>(Collections.users, input.actor.id);
+    if (actorUser) {
+      actorName = actorUser.name?.trim() || actorUser.email?.trim() || actorName;
+      actorAvatar = actorUser.avatar ?? actorAvatar;
+    }
+  }
+
+  const link = origin ? `${origin}${taskPath(input.taskId, projectName, input.activityId ?? null)}` : "";
+  const avatar = avatarHtml(actorName, actorAvatar, origin, 40);
+  const due = task?.dueDate ? formatDueLabel(task.dueDate) : "No due date";
+  const description = clip(plainText(task?.description), 360);
+  const comment = clip(commentBody(input.kind, input.message), 500);
+  const email = buildEmail({
+    actorName,
+    avatar,
+    headline: headlineFor(input.kind, actorName),
+    taskTitle,
+    projectName,
+    status: task ? STATUS_LABELS[task.status] ?? labelize(task.status) : "",
+    priority: task?.priority ? labelize(task.priority) : "",
+    due,
+    description,
+    comment,
+    when: formatWorkZoneDateTime(new Date()),
+    link,
+    logoUrl: origin ? `${origin}/aaso-favicon.png` : "",
+  });
   const subject = subjectFor(input.kind, actorName, taskTitle);
-  const link = taskUrl(input.taskId, project?.name ?? null, input.activityId ?? null);
-  const text = [input.message, link ? `Open the task: ${link}` : ""].filter(Boolean).join("\n\n");
-  const html = [
-    `<p style="margin:0 0 16px;font-family:Arial,sans-serif;font-size:15px;line-height:1.5;color:#111827;">${escapeHtml(input.message)}</p>`,
-    link
-      ? `<p style="margin:0;font-family:Arial,sans-serif;"><a href="${escapeHtml(link)}" style="color:#2563EB;">Open the task</a></p>`
-      : "",
-  ].join("");
 
   await Promise.all(
     recipients.map(async (user) => {
@@ -94,8 +341,9 @@ export async function sendTaskNotificationEmails(input: {
         await sendMail({
           to: user.email!.trim(),
           subject,
-          text,
-          html,
+          text: email.text,
+          html: email.html,
+          attachments: avatar.attachment ? [avatar.attachment] : undefined,
         });
       } catch (error) {
         console.error(`[task-email] could not email user ${user.id}:`, error);

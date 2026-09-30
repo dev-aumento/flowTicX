@@ -33,6 +33,12 @@ export async function sendMail(input: {
   subject: string;
   text: string;
   html?: string;
+  attachments?: Array<{
+    filename: string;
+    content: Buffer;
+    cid: string;
+    contentType: string;
+  }>;
 }) {
   const mailer = getMailer();
   if (!mailer) return { delivered: false as const };
@@ -43,6 +49,7 @@ export async function sendMail(input: {
     subject: input.subject,
     text: input.text,
     html: input.html,
+    attachments: input.attachments,
   });
   return { delivered: true as const };
 }
