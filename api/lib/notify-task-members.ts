@@ -2,6 +2,7 @@ import { Collections } from "@db/mongo/collections";
 import type { NotificationDoc, SafeUser, TaskDoc, UserDoc } from "@db/mongo/types";
 import { findById, getCollection, insertDoc } from "../queries/connection";
 import { isHrDepartmentUser } from "@/lib/leave-policy";
+import { sendTaskNotificationEmails, taskEmailKind } from "./send-task-email";
 
 type NotifyTaskMembersInput = {
   taskId: number;
@@ -123,6 +124,19 @@ export async function notifyTaskMembers({
       }),
     ),
   );
+
+  const emailKind = taskEmailKind(type, title);
+  if (!emailKind) return;
+  void sendTaskNotificationEmails({
+    userIds: recipients,
+    taskId,
+    actor,
+    kind: emailKind,
+    message,
+    activityId,
+  }).catch((error) => {
+    console.error("[task-email] send failed:", error);
+  });
 }
 
 /** Notify assignee, participants, and observers (for deadline / due-date alerts). */

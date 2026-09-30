@@ -58,7 +58,7 @@ export type NotificationType =
   | "invoice_updated";
 
 export type DataTransferAction = "import" | "export";
-export type DataTransferDataset = "projects" | "tasks" | "hours";
+export type DataTransferDataset = "projects" | "tasks" | "hours" | "clients";
 export type DataTransferFormat = "csv" | "pdf" | "docx";
 
 export type DataTransferLogDoc = {

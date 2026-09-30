@@ -1,9 +1,11 @@
+import { randomBytes } from "node:crypto";
 import { TRPCError } from "@trpc/server";
 import { Collections } from "@db/mongo/collections";
 import type {
   DataTransferDataset,
   DataTransferFormat,
   DataTransferLogDoc,
+  CustomerDoc,
   ProjectDoc,
   ProjectStatus,
   TaskDoc,
@@ -24,11 +26,22 @@ const DATASET_FEATURE: Record<DataTransferDataset, string> = {
   projects: "projects",
   tasks: "tasks",
   hours: "time_tracking",
+  clients: "time_tracking",
 };
 
 const PROJECT_HEADERS = ["Name", "Description", "Client", "Status"];
 const TASK_HEADERS = ["Title", "Description", "Project", "Status", "Priority", "Assignee email", "Due date", "Estimated hours"];
-const HOUR_HEADERS = ["Task", "Project", "Employee email", "Clock in", "Clock out", "Hours", "Note"];
+const HOUR_TOTAL_HEADERS = ["Project", "Task", "Total hours"];
+const HOUR_SUMMARY_HEADERS = ["Project", "Task", "Time entries", "Total hours"];
+const CLIENT_PROJECT_HEADERS = ["Project name", "Total hours of all tasks"];
+const CLIENT_TASK_HEADERS = ["Project name", "Task", "Hours"];
+
+export type ExportScope = {
+  mode: "all" | "project" | "task" | "totals" | "client-projects" | "client-tasks";
+  projectId: number | null;
+  taskId: number | null;
+  clientName: string | null;
+};
 
 const PROJECT_STATUSES = new Set<ProjectStatus>(["active", "archived", "completed"]);
 const TASK_STATUSES = new Set<TaskStatus>(["todo", "in_progress", "review", "done"]);
@@ -67,24 +80,94 @@ export async function listDataTransferLogs(organizationId: number) {
   return col.find({ organizationId }).sort({ createdAt: -1, id: -1 }).limit(100).toArray();
 }
 
-export async function exportDataset(user: Actor, dataset: DataTransferDataset, format: DataTransferFormat) {
+type PendingExport = {
+  userId: number;
+  organizationId: number;
+  dataset: DataTransferDataset;
+  format: DataTransferFormat;
+  fileName: string;
+  rowCount: number;
+  message: string;
+  expiresAt: number;
+};
+
+const pendingExports = new Map<string, PendingExport>();
+
+export async function listExportChoices(user: Actor) {
+  assertCanManageData(user);
+  const organizationId = organizationIdOf(user);
+  const projects = await getCollection<ProjectDoc>(Collections.projects);
+  const tasks = await getCollection<TaskDoc>(Collections.tasks);
+  const projectDocs = await projects
+    .find({ organizationId })
+    .project({ id: 1, name: 1, clientName: 1, createdBy: 1 })
+    .sort({ name: 1 })
+    .toArray();
+  const taskDocs = await tasks
+    .find({ organizationId })
+    .project({ id: 1, title: 1, projectId: 1 })
+    .sort({ title: 1 })
+    .limit(3000)
+    .toArray();
+  return {
+    projects: projectDocs.map((project) => ({ id: project.id, name: project.name })),
+    tasks: taskDocs.map((task) => ({
+      id: task.id,
+      title: task.title,
+      projectId: task.projectId ?? null,
+    })),
+    clients: await listClientNames(
+      organizationId,
+      projectDocs.map((project) => ({
+        clientName: typeof project.clientName === "string" ? project.clientName : null,
+        createdBy: typeof project.createdBy === "number" ? project.createdBy : null,
+      })),
+    ),
+  };
+}
+
+export async function exportDataset(
+  user: Actor,
+  dataset: DataTransferDataset,
+  format: DataTransferFormat,
+  scope: ExportScope = { mode: "all", projectId: null, taskId: null, clientName: null },
+) {
   assertCanManageData(user);
   const organizationId = organizationIdOf(user);
   await assertPlanFeature(user, DATASET_FEATURE[dataset]);
-  const table = await buildTable(organizationId, dataset);
-  const file = await renderFile(table, dataset, format);
-  await writeLog(user, organizationId, {
-    action: "export",
+  const resolved = await resolveScope(organizationId, dataset, scope);
+  const table = await buildTable(organizationId, dataset, resolved);
+  const file = await renderFile(table, dataset, format, resolved.fileKey, exportTitle(dataset, resolved));
+  const message = exportMessage(dataset, format, table.rows.length, resolved);
+  const token = rememberExport({
+    userId: user.id,
+    organizationId,
     dataset,
     format,
     fileName: file.fileName,
     rowCount: table.rows.length,
+    message,
+  });
+  return { ...file, rowCount: table.rows.length, token };
+}
+
+export async function confirmExport(user: Actor, token: string, savedFileName?: string) {
+  assertCanManageData(user);
+  const organizationId = organizationIdOf(user);
+  const pending = takePendingExport(token, user.id, organizationId);
+  const fileName = (savedFileName?.trim() || pending.fileName).slice(0, 240);
+  await writeLog(user, organizationId, {
+    action: "export",
+    dataset: pending.dataset,
+    format: pending.format,
+    fileName,
+    rowCount: pending.rowCount,
     createdCount: 0,
     updatedCount: 0,
     skippedCount: 0,
-    message: `Exported ${table.rows.length} ${datasetLabel(dataset)} as ${formatLabel(format)}.`,
+    message: pending.message,
   });
-  return { ...file, rowCount: table.rows.length };
+  return { fileName, rowCount: pending.rowCount };
 }
 
 export async function importDataset(
@@ -96,6 +179,9 @@ export async function importDataset(
 ) {
   assertCanManageData(user);
   const organizationId = organizationIdOf(user);
+  if (dataset === "clients") {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Client hours can only be exported." });
+  }
   await assertPlanFeature(user, DATASET_FEATURE[dataset]);
   const buffer = Buffer.from(base64, "base64");
   if (buffer.length === 0) {
@@ -176,7 +262,94 @@ export async function importDataset(
   };
 }
 
-async function buildTable(organizationId: number, dataset: DataTransferDataset): Promise<TabularFile> {
+type ResolvedScope = ExportScope & {
+  projectName: string | null;
+  taskTitle: string | null;
+  fileKey: string;
+};
+
+async function resolveScope(
+  organizationId: number,
+  dataset: DataTransferDataset,
+  scope: ExportScope,
+): Promise<ResolvedScope> {
+  if (dataset === "clients") {
+    if (scope.mode !== "client-projects" && scope.mode !== "client-tasks") {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Choose project wise totals or task wise hours." });
+    }
+    const clientName = scope.clientName?.trim() ?? "";
+    if (!clientName) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Choose a client." });
+    }
+    const slug = clientFileSlug(clientName);
+    return {
+      mode: scope.mode,
+      projectId: null,
+      taskId: null,
+      clientName,
+      projectName: null,
+      taskTitle: null,
+      fileKey: scope.mode === "client-projects" ? `client-${slug}-project-totals` : `client-${slug}-task-hours`,
+    };
+  }
+
+  if (dataset === "projects" || scope.mode === "all") {
+    return {
+      mode: "all",
+      projectId: null,
+      taskId: null,
+      clientName: null,
+      projectName: null,
+      taskTitle: null,
+      fileKey: dataset,
+    };
+  }
+
+  if (scope.mode === "client-projects" || scope.mode === "client-tasks") {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Choose a client export." });
+  }
+
+  if (dataset === "tasks" && scope.mode !== "project") {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Choose overall tasks or one project." });
+  }
+  if (dataset === "hours" && scope.mode === "task" && scope.taskId == null) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Choose a task." });
+  }
+  if (scope.mode === "project" && scope.projectId == null) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Choose a project." });
+  }
+
+  const project = scope.projectId != null ? await findOrgProject(organizationId, scope.projectId) : null;
+  if (scope.mode === "project" && !project) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Choose a project in this workspace." });
+  }
+
+  const task = scope.taskId != null ? await findOrgTask(organizationId, scope.taskId) : null;
+  if (scope.mode === "task") {
+    if (!task) throw new TRPCError({ code: "BAD_REQUEST", message: "Choose a task in this workspace." });
+    if (project && task.projectId !== project.id) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "That task is not in the selected project." });
+    }
+  }
+
+  const fileKey =
+    scope.mode === "totals" ? "hours-totals" : scope.mode === "task" ? "hours-task" : `${dataset}-project`;
+  return {
+    mode: scope.mode,
+    projectId: project?.id ?? null,
+    taskId: task?.id ?? null,
+    clientName: null,
+    projectName: project?.name ?? null,
+    taskTitle: task?.title ?? null,
+    fileKey,
+  };
+}
+
+async function buildTable(
+  organizationId: number,
+  dataset: DataTransferDataset,
+  scope: ResolvedScope,
+): Promise<TabularFile> {
   if (dataset === "projects") {
     const projects = await getCollection<ProjectDoc>(Collections.projects);
     const docs = await projects.find({ organizationId }).sort({ name: 1 }).toArray();
@@ -193,7 +366,8 @@ async function buildTable(organizationId: number, dataset: DataTransferDataset):
 
   if (dataset === "tasks") {
     const tasks = await getCollection<TaskDoc>(Collections.tasks);
-    const docs = await tasks.find({ organizationId }).sort({ createdAt: -1 }).toArray();
+    const filter = scope.projectId != null ? { organizationId, projectId: scope.projectId } : { organizationId };
+    const docs = await tasks.find(filter).sort({ createdAt: -1 }).toArray();
     const projectMap = await projectNameMap(organizationId);
     const userMap = await userEmailMap(organizationId);
     return {
@@ -211,35 +385,283 @@ async function buildTable(organizationId: number, dataset: DataTransferDataset):
     };
   }
 
-  const entries = await getCollection<TimeEntryDoc>(Collections.timeEntries);
-  const docs = await entries
-    .find({ organizationId, taskId: { $ne: null } })
-    .sort({ clockIn: -1 })
-    .limit(5000)
-    .toArray();
+  if (dataset === "clients") return buildClientHours(organizationId, scope);
+
+  return buildHourTotals(organizationId, scope.projectId, scope.taskId, scope.mode === "totals");
+}
+
+async function buildHourTotals(
+  organizationId: number,
+  projectId: number | null,
+  taskId: number | null,
+  withSummary: boolean,
+): Promise<TabularFile> {
+  const tasks = await getCollection<TaskDoc>(Collections.tasks);
+  const taskFilter =
+    taskId != null
+      ? { organizationId, id: taskId }
+      : projectId != null
+        ? { organizationId, projectId }
+        : { organizationId };
+  const taskDocs = await tasks.find(taskFilter).sort({ title: 1 }).toArray();
   const projectMap = await projectNameMap(organizationId);
-  const taskMap = await taskTitleMap(organizationId);
-  const userMap = await userEmailMap(organizationId);
-  return {
-    headers: HOUR_HEADERS,
-    rows: docs.map((entry) => {
-      const seconds =
-        typeof entry.durationSeconds === "number" && entry.durationSeconds >= 0
-          ? entry.durationSeconds
-          : entry.clockOut
-            ? Math.max(0, Math.floor((new Date(entry.clockOut).getTime() - new Date(entry.clockIn).getTime()) / 1000))
-            : 0;
-      return [
-        entry.taskId != null ? taskMap.get(entry.taskId) ?? "" : "",
-        entry.projectId != null ? projectMap.get(entry.projectId) ?? "" : "",
-        userMap.get(entry.userId) ?? "",
-        toIso(entry.clockIn),
-        entry.clockOut ? toIso(entry.clockOut) : "",
-        (seconds / 3600).toFixed(2),
-        entry.note ?? "",
-      ];
-    }),
+  const entries = await getCollection<TimeEntryDoc>(Collections.timeEntries);
+  const taskIds = taskDocs.map((task) => task.id);
+  const entryDocs =
+    taskIds.length > 0
+      ? await entries.find({ organizationId, taskId: { $in: taskIds } }).toArray()
+      : [];
+  const totals = new Map<number, { seconds: number; count: number }>();
+  for (const entry of entryDocs) {
+    if (entry.taskId == null) continue;
+    const current = totals.get(entry.taskId) ?? { seconds: 0, count: 0 };
+    current.seconds += entrySeconds(entry);
+    current.count += 1;
+    totals.set(entry.taskId, current);
+  }
+
+  const sorted = [...taskDocs].sort((left, right) => {
+    const leftName = left.projectId != null ? projectMap.get(left.projectId) ?? "" : "";
+    const rightName = right.projectId != null ? projectMap.get(right.projectId) ?? "" : "";
+    return leftName.localeCompare(rightName) || left.title.localeCompare(right.title);
+  });
+
+  const rows: string[][] = [];
+  let currentProject: string | null = null;
+  let projectSeconds = 0;
+  let projectEntries = 0;
+  const flush = () => {
+    if (!withSummary || currentProject == null) return;
+    rows.push([currentProject, "Total", String(projectEntries), hoursLabel(projectSeconds)]);
   };
+
+  for (const task of sorted) {
+    const projectName = task.projectId != null ? projectMap.get(task.projectId) ?? "" : "";
+    if (currentProject !== projectName) {
+      flush();
+      currentProject = projectName;
+      projectSeconds = 0;
+      projectEntries = 0;
+    }
+    const stat = totals.get(task.id) ?? { seconds: 0, count: 0 };
+    rows.push(
+      withSummary
+        ? [projectName, task.title, String(stat.count), hoursLabel(stat.seconds)]
+        : [projectName, task.title, hoursLabel(stat.seconds)],
+    );
+    projectSeconds += stat.seconds;
+    projectEntries += stat.count;
+  }
+  flush();
+  return { headers: withSummary ? HOUR_SUMMARY_HEADERS : HOUR_TOTAL_HEADERS, rows };
+}
+
+async function findOrgProject(organizationId: number, projectId: number) {
+  const projects = await getCollection<ProjectDoc>(Collections.projects);
+  return projects.findOne({ organizationId, id: projectId });
+}
+
+async function findOrgTask(organizationId: number, taskId: number) {
+  const tasks = await getCollection<TaskDoc>(Collections.tasks);
+  return tasks.findOne({ organizationId, id: taskId });
+}
+
+function entrySeconds(entry: TimeEntryDoc) {
+  if (typeof entry.durationSeconds === "number" && entry.durationSeconds >= 0) return entry.durationSeconds;
+  if (entry.clockOut) {
+    return Math.max(0, Math.floor((new Date(entry.clockOut).getTime() - new Date(entry.clockIn).getTime()) / 1000));
+  }
+  return 0;
+}
+
+function hoursLabel(seconds: number) {
+  return (seconds / 3600).toFixed(2);
+}
+
+function hoursAmount(seconds: number) {
+  const rounded = Math.round((seconds / 3600) * 100) / 100;
+  return String(rounded);
+}
+
+function normalizeClientKey(name: string) {
+  return name.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function clientFileSlug(name: string) {
+  const slug = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+  return slug || "client";
+}
+
+function exportTitle(dataset: DataTransferDataset, scope: ResolvedScope) {
+  if (dataset === "clients" && scope.clientName) {
+    return scope.mode === "client-projects"
+      ? `${scope.clientName} project totals`
+      : `${scope.clientName} task hours`;
+  }
+  return `${datasetLabel(dataset)} export`;
+}
+
+async function listClientNames(
+  organizationId: number,
+  projectDocs: Array<{ clientName: string | null; createdBy: number | null }>,
+) {
+  const names = new Map<string, string>();
+  const add = (raw: string | null | undefined) => {
+    const name = raw?.trim().replace(/\s+/g, " ") ?? "";
+    if (!name) return;
+    const key = name.toLowerCase();
+    if (!names.has(key)) names.set(key, name);
+  };
+
+  for (const project of projectDocs) add(project.clientName);
+
+  const blankProjectCreators = new Set(
+    projectDocs
+      .filter((project) => !project.clientName?.trim() && project.createdBy != null)
+      .map((project) => project.createdBy as number),
+  );
+  if (blankProjectCreators.size > 0) {
+    const users = await getCollection<UserDoc>(Collections.users);
+    const clientUsers = await users
+      .find({ organizationId, role: "client", id: { $in: [...blankProjectCreators] } })
+      .project({ id: 1, name: 1 })
+      .toArray();
+    for (const user of clientUsers) add(user.name);
+
+    const customers = await getCollection<CustomerDoc>(Collections.customers);
+    const customerDocs = await customers
+      .find({ organizationId, sourceUserId: { $in: [...blankProjectCreators] } })
+      .project({ displayName: 1, companyName: 1 })
+      .toArray();
+    for (const customer of customerDocs) add(customer.displayName || customer.companyName);
+  }
+
+  return [...names.values()].sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }));
+}
+
+async function projectsForClient(organizationId: number, clientName: string) {
+  const key = normalizeClientKey(clientName);
+  const projects = await getCollection<ProjectDoc>(Collections.projects);
+  const projectDocs = await projects.find({ organizationId }).toArray();
+  const users = await getCollection<UserDoc>(Collections.users);
+  const clientUsers = await users
+    .find({ organizationId, role: "client" })
+    .project({ id: 1, name: 1 })
+    .toArray();
+  const customers = await getCollection<CustomerDoc>(Collections.customers);
+  const customerDocs = await customers
+    .find({ organizationId })
+    .project({ displayName: 1, companyName: 1, sourceUserId: 1 })
+    .toArray();
+
+  const matchingUserIds = new Set<number>();
+  for (const user of clientUsers) {
+    if (normalizeClientKey(user.name ?? "") === key) matchingUserIds.add(user.id);
+  }
+  for (const customer of customerDocs) {
+    const label = (customer.displayName || customer.companyName || "").trim();
+    if (customer.sourceUserId != null && normalizeClientKey(label) === key) {
+      matchingUserIds.add(customer.sourceUserId);
+    }
+  }
+
+  let memberProjectIds = new Set<number>();
+  if (matchingUserIds.size > 0) {
+    const members = await getCollection<{ projectId: number; userId: number }>(Collections.projectMembers);
+    const rows = await members
+      .find({ userId: { $in: [...matchingUserIds] } })
+      .project({ projectId: 1 })
+      .toArray();
+    memberProjectIds = new Set(rows.map((row) => row.projectId));
+  }
+
+  return projectDocs.filter((project) => {
+    const named = normalizeClientKey(project.clientName ?? "");
+    if (named) return named === key;
+    if (project.createdBy != null && matchingUserIds.has(project.createdBy)) return true;
+    return memberProjectIds.has(project.id);
+  });
+}
+
+async function buildClientHours(organizationId: number, scope: ResolvedScope): Promise<TabularFile> {
+  const clientName = scope.clientName?.trim() ?? "";
+  const matched = await projectsForClient(organizationId, clientName);
+  if (matched.length === 0) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "No projects were found for this client." });
+  }
+  matched.sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }) || left.id - right.id);
+
+  const projectIds = matched.map((project) => project.id);
+  const tasks = await getCollection<TaskDoc>(Collections.tasks);
+  const taskDocs = await tasks.find({ organizationId, projectId: { $in: projectIds } }).toArray();
+  const entries = await getCollection<TimeEntryDoc>(Collections.timeEntries);
+  const taskIds = taskDocs.map((task) => task.id);
+  const entryDocs =
+    taskIds.length > 0 ? await entries.find({ organizationId, taskId: { $in: taskIds } }).toArray() : [];
+  const secondsByTask = new Map<number, number>();
+  for (const entry of entryDocs) {
+    if (entry.taskId == null) continue;
+    secondsByTask.set(entry.taskId, (secondsByTask.get(entry.taskId) ?? 0) + entrySeconds(entry));
+  }
+  const tasksByProject = new Map<number, TaskDoc[]>();
+  for (const task of taskDocs) {
+    if (task.projectId == null) continue;
+    const list = tasksByProject.get(task.projectId) ?? [];
+    list.push(task);
+    tasksByProject.set(task.projectId, list);
+  }
+
+  if (scope.mode === "client-projects") {
+    return {
+      headers: CLIENT_PROJECT_HEADERS,
+      rows: matched.map((project) => {
+        const seconds = (tasksByProject.get(project.id) ?? []).reduce(
+          (sum, task) => sum + (secondsByTask.get(task.id) ?? 0),
+          0,
+        );
+        return [project.name, hoursAmount(seconds)];
+      }),
+    };
+  }
+
+  const rows: string[][] = [];
+  for (const project of matched) {
+    const projectTasks = [...(tasksByProject.get(project.id) ?? [])].sort((left, right) =>
+      left.title.localeCompare(right.title, undefined, { sensitivity: "base" }),
+    );
+    let seconds = 0;
+    for (const task of projectTasks) {
+      const taskSeconds = secondsByTask.get(task.id) ?? 0;
+      seconds += taskSeconds;
+      rows.push([project.name, task.title, `${hoursAmount(taskSeconds)} hours`]);
+    }
+    rows.push([project.name, "Total", `${hoursAmount(seconds)} hours`]);
+  }
+  return { headers: CLIENT_TASK_HEADERS, rows };
+}
+
+function exportMessage(
+  dataset: DataTransferDataset,
+  format: DataTransferFormat,
+  rowCount: number,
+  scope: ResolvedScope,
+) {
+  if (dataset === "clients" && scope.clientName) {
+    const what = scope.mode === "client-projects" ? "project totals" : "task hour rows";
+    return `Exported ${rowCount} ${what} for ${scope.clientName} as ${formatLabel(format)}.`;
+  }
+  const what = dataset === "hours" && scope.mode === "totals" ? "task hour totals" : datasetLabel(dataset);
+  const where = scope.taskTitle
+    ? ` for ${scope.taskTitle}`
+    : scope.projectName
+      ? ` from ${scope.projectName}`
+      : "";
+  return `Exported ${rowCount} ${what}${where} as ${formatLabel(format)}.`;
 }
 
 async function importProjects(user: Actor, organizationId: number, table: TabularFile) {
@@ -425,7 +847,7 @@ async function importHours(user: Actor, organizationId: number, table: TabularFi
     }
     const clockIn = parseDate(cell(row, index, ["clockin", "start", "startedat"]));
     const clockOut = parseDate(cell(row, index, ["clockout", "end", "endedat"]));
-    const hours = Number(cell(row, index, ["hours", "duration", "durationhours"]));
+    const hours = Number(cell(row, index, ["hours", "totalhours", "duration", "durationhours"]));
     let start = clockIn;
     let end = clockOut;
     if (!start && Number.isFinite(hours) && hours > 0) {
@@ -462,10 +884,15 @@ async function importHours(user: Actor, organizationId: number, table: TabularFi
   return { createdCount, updatedCount, skippedCount, notes: uniqueNotes(notes) };
 }
 
-async function renderFile(table: TabularFile, dataset: DataTransferDataset, format: DataTransferFormat) {
+async function renderFile(
+  table: TabularFile,
+  dataset: DataTransferDataset,
+  format: DataTransferFormat,
+  fileKey: string = dataset,
+  title = `${datasetLabel(dataset)} export`,
+) {
   const stamp = new Date().toISOString().slice(0, 10);
-  const base = `${dataset}-${stamp}`;
-  const title = `${datasetLabel(dataset)} export`;
+  const base = `${fileKey}-${stamp}`;
   if (format === "csv") {
     return {
       fileName: `${base}.csv`,
@@ -572,6 +999,28 @@ function uniqueNotes(notes: string[]) {
   return [...new Set(notes)].slice(0, 8);
 }
 
+function rememberExport(entry: Omit<PendingExport, "expiresAt">) {
+  const now = Date.now();
+  for (const [key, pending] of pendingExports) {
+    if (pending.expiresAt <= now) pendingExports.delete(key);
+  }
+  const token = randomBytes(16).toString("hex");
+  pendingExports.set(token, { ...entry, expiresAt: now + 10 * 60 * 1000 });
+  return token;
+}
+
+function takePendingExport(token: string, userId: number, organizationId: number) {
+  const pending = pendingExports.get(token);
+  pendingExports.delete(token);
+  if (!pending || pending.expiresAt <= Date.now() || pending.userId !== userId || pending.organizationId !== organizationId) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Save the exported file to add it to the log. Export it again if the save was cancelled.",
+    });
+  }
+  return pending;
+}
+
 function organizationIdOf(user: Actor) {
   return requireOrganizationId({ id: user.id, organizationId: user.organizationId ?? null });
 }
@@ -579,6 +1028,7 @@ function organizationIdOf(user: Actor) {
 function datasetLabel(dataset: DataTransferDataset) {
   if (dataset === "projects") return "projects";
   if (dataset === "tasks") return "tasks";
+  if (dataset === "clients") return "client hours";
   return "task hours";
 }
 

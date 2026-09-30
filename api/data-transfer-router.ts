@@ -3,12 +3,14 @@ import { createRouter, authedQuery } from "./middleware";
 import { requireOrganizationId } from "./lib/tenant";
 import {
   assertCanManageData,
+  confirmExport,
   exportDataset,
   importDataset,
   listDataTransferLogs,
+  listExportChoices,
 } from "./lib/data-transfer";
 
-const datasetSchema = z.enum(["projects", "tasks", "hours"]);
+const datasetSchema = z.enum(["projects", "tasks", "hours", "clients"]);
 const formatSchema = z.enum(["csv", "pdf", "docx"]);
 
 export const dataTransferRouter = createRouter({
@@ -32,9 +34,40 @@ export const dataTransferRouter = createRouter({
     }));
   }),
 
+  choices: authedQuery.query(async ({ ctx }) => listExportChoices(ctx.user)),
+
   export: authedQuery
-    .input(z.object({ dataset: datasetSchema, format: formatSchema }))
-    .mutation(async ({ ctx, input }) => exportDataset(ctx.user, input.dataset, input.format)),
+    .input(
+      z.object({
+        dataset: datasetSchema,
+        format: formatSchema,
+        scope: z
+          .object({
+            mode: z.enum(["all", "project", "task", "totals", "client-projects", "client-tasks"]),
+            projectId: z.number().int().positive().nullable().optional(),
+            taskId: z.number().int().positive().nullable().optional(),
+            clientName: z.string().trim().min(1).max(200).nullable().optional(),
+          })
+          .optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) =>
+      exportDataset(ctx.user, input.dataset, input.format, {
+        mode: input.scope?.mode ?? "all",
+        projectId: input.scope?.projectId ?? null,
+        taskId: input.scope?.taskId ?? null,
+        clientName: input.scope?.clientName ?? null,
+      }),
+    ),
+
+  confirmExport: authedQuery
+    .input(
+      z.object({
+        token: z.string().min(16).max(64),
+        fileName: z.string().min(1).max(240).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => confirmExport(ctx.user, input.token, input.fileName)),
 
   import: authedQuery
     .input(
