@@ -125,6 +125,7 @@ export function buildDisplayName(
 export function buildPersonalInfoUserPatch(
   input: PersonalInfoUpdateInput | SelfPersonalInfoUpdateInput,
   existingUser: Pick<UserDoc, "firstName" | "lastName" | "name" | "email">,
+  options?: { allowEmailChange?: boolean },
 ): Partial<UserDoc> {
   const patch: Partial<UserDoc> = {
     updatedAt: new Date(),
@@ -133,9 +134,11 @@ export function buildPersonalInfoUserPatch(
   if (input.firstName !== undefined) patch.firstName = input.firstName;
   if (input.lastName !== undefined) patch.lastName = input.lastName;
   if (input.secondName !== undefined) patch.secondName = input.secondName;
-  // Email is locked once set — only allow setting when the account has none yet.
-  if (input.email !== undefined && !existingUser.email?.trim()) {
-    patch.email = input.email;
+  if (input.email !== undefined) {
+    const next = input.email.trim().toLowerCase();
+    const current = existingUser.email?.trim().toLowerCase() ?? "";
+    const mayChange = options?.allowEmailChange || !current;
+    if (next && mayChange && next !== current) patch.email = next;
   }
   if (input.department !== undefined) patch.department = input.department;
   if (input.position !== undefined) patch.position = input.position;

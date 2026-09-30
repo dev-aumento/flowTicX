@@ -103,7 +103,7 @@ export function EmployeeDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-6xl lg:max-h-[calc(100vh-2rem)]">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-6xl lg:max-w-7xl lg:max-h-[calc(100vh-2rem)]">
         <DialogHeader>
           <DialogTitle>Employee details</DialogTitle>
           <DialogDescription>

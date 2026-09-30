@@ -4,7 +4,7 @@ import { createRouter, authedQuery, employeesManageQuery, employeesDirectoryQuer
 import { isAuthDisabled } from "./lib/dev-mode";
 import * as mock from "./lib/mock-store";
 import { getCollection, findById, updateById } from "./queries/connection";
-import { omitPasswordHash } from "./queries/users";
+import { findUsersByEmail, omitPasswordHash } from "./queries/users";
 import { syncEmployeeFromUser, deactivateEmployeeByUserId, createEmployeeFromUser, deleteEmployeeByUserId, getEmployeeUserIdSet, isListedInEmployeeDirectory } from "./queries/employees";
 import { Collections } from "@db/mongo/collections";
 import type { UserDoc } from "@db/mongo/types";
@@ -53,6 +53,28 @@ function restrictPersonalInfoInputForCaller(
     });
   }
   return { onNoticePeriod: data.onNoticePeriod };
+}
+
+async function assertWorkEmailAvailable(
+  email: string,
+  userId: number,
+  organizationId: number | null | undefined,
+  lookup: (email: string) => Promise<Array<Pick<UserDoc, "id" | "organizationId">>> | Array<Pick<UserDoc, "id" | "organizationId">>,
+) {
+  const normalized = email.trim().toLowerCase();
+  const matches = await lookup(normalized);
+  const taken = matches.some(
+    (user) =>
+      user.id !== userId &&
+      (organizationId == null || user.organizationId === organizationId),
+  );
+  if (taken) {
+    throw new TRPCError({
+      code: "CONFLICT",
+      message: "Another account in this workspace already uses this email.",
+    });
+  }
+  return normalized;
 }
 
 function escapeRegex(value: string) {
@@ -293,6 +315,15 @@ export const userRouter = createRouter({
       const data = restrictPersonalInfoInputForCaller(ctx.user, rawData);
 
       if (isAuthDisabled() || !hasMongoConfigured()) {
+        if (data.email) {
+          const current = mock.mockFindUserById(id);
+          data.email = await assertWorkEmailAvailable(
+            data.email,
+            id,
+            current?.organizationId,
+            (email) => mock.mockFindUsersByEmail(email),
+          );
+        }
         const view = mock.mockUpdatePersonalInfo(id, data, { includePrivateNotes: false });
         if (!canManageHead) {
           return {
@@ -310,8 +341,17 @@ export const userRouter = createRouter({
         throw new TRPCError({ code: "NOT_FOUND", message: "User not found" });
       }
 
+      if (data.email) {
+        data.email = await assertWorkEmailAvailable(
+          data.email,
+          id,
+          existing.organizationId,
+          (email) => findUsersByEmail(email),
+        );
+      }
+
       // Admin schema has no privateNotes — owner notes are never overwritten here.
-      const patch = buildPersonalInfoUserPatch(data, existing);
+      const patch = buildPersonalInfoUserPatch(data, existing, { allowEmailChange: true });
       const updated = await updateById<UserDoc>(Collections.users, id, patch);
       if (!updated) {
         throw new TRPCError({ code: "NOT_FOUND", message: "User not found" });

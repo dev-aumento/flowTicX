@@ -22,7 +22,7 @@ function daysInMonth(year: number, month: number) {
 }
 
 const selectClass =
-  "h-10 px-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 focus:border-[#2563EB]";
+  "h-10 w-full min-w-0 px-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 focus:border-[#2563EB]";
 
 export function CalendarDateSelect({
   value,
@@ -64,7 +64,7 @@ export function CalendarDateSelect({
   };
 
   return (
-    <div className={cn("grid grid-cols-3 gap-2", className)}>
+    <div className={cn("grid min-w-0 grid-cols-[4.5rem_minmax(0,1fr)_5rem] gap-2", className)}>
       <select
         aria-label="Day"
         value={day || ""}

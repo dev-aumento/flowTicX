@@ -188,8 +188,8 @@ function FormField({
   children: ReactNode;
 }) {
   return (
-    <div>
-      <label className="block text-xs text-gray-500 mb-1">{label}</label>
+    <div className="min-w-0">
+      <label className="block text-xs text-gray-500 mb-1.5">{label}</label>
       {children}
     </div>
   );
@@ -203,7 +203,7 @@ type PersonalInformationPanelProps = {
   userId?: number;
   onSaved?: () => void;
   onError?: (message: string) => void;
-  /** Wider employee dialog: more columns, documents beside the fields. */
+  /** Employee details dialog: three columns on desktop. */
   wide?: boolean;
 };
 
@@ -221,12 +221,12 @@ export function PersonalInformationPanel({
 
   const isSelf = userId == null || userId === user?.id;
   const fieldGrid = wide
-    ? "rounded-xl border border-gray-200 bg-white px-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-6"
+    ? "rounded-xl border border-gray-200 bg-white px-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-8"
     : "rounded-xl border border-gray-200 bg-white px-4 grid grid-cols-1 md:grid-cols-2 gap-x-4";
   const formGrid = wide
-    ? "rounded-xl border border-gray-200 bg-white p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
+    ? "rounded-xl border border-gray-200 bg-white p-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-5"
     : "rounded-xl border border-gray-200 bg-white p-4 grid grid-cols-1 md:grid-cols-2 gap-4";
-  const spanAll = wide ? "sm:col-span-2 lg:col-span-4" : "md:col-span-2";
+  const spanAll = wide ? "sm:col-span-2 lg:col-span-3" : "md:col-span-2";
   const compact = isClientPortalUser(user);
   const canManageHeadOfDepartment = hasPermission(user, "profile.head_of_department");
   const canEditEmploymentType = hasPermission(user, "employees.manage");
@@ -235,6 +235,7 @@ export function PersonalInformationPanel({
   const noticeOnlyEditor = Boolean(
     !isSelf && canEditNoticePeriod && !hasPermission(user, "employees.manage"),
   );
+  const canChangeWorkEmail = wide && !noticeOnlyEditor;
 
   const selfQuery = trpc.auth.getPersonalInfo.useQuery(undefined, { enabled: isSelf });
   const adminQuery = trpc.user.getPersonalInfo.useQuery(
@@ -338,6 +339,11 @@ export function PersonalInformationPanel({
       onError?.("First name is required.");
       return;
     }
+    const workEmail = form.email.trim().toLowerCase();
+    if (canChangeWorkEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(workEmail)) {
+      onError?.("Enter a valid work email.");
+      return;
+    }
 
     const payload = compact
       ? {
@@ -350,7 +356,11 @@ export function PersonalInformationPanel({
           firstName: form.firstName.trim() || null,
           lastName: form.lastName.trim() || null,
           secondName: form.secondName.trim() || null,
-          email: data.email?.trim() ? undefined : form.email.trim() || undefined,
+          email: canChangeWorkEmail
+            ? workEmail
+            : data.email?.trim()
+              ? undefined
+              : form.email.trim() || undefined,
           position: form.position.trim() || null,
           department: form.department.trim() || null,
           phone: form.phone.trim() || null,
@@ -436,13 +446,7 @@ export function PersonalInformationPanel({
         )}
       </div>
 
-      <div
-        className={
-          wide && !compact
-            ? "lg:grid lg:grid-cols-[minmax(0,1fr)_18rem] lg:items-start lg:gap-4"
-            : undefined
-        }
-      >
+      <div className={wide && !compact ? "space-y-4" : undefined}>
       {compact ? (
         !editing ? (
           <div className="rounded-xl border border-gray-200 bg-white px-4 grid grid-cols-1 md:grid-cols-2 gap-x-4">
@@ -493,7 +497,7 @@ export function PersonalInformationPanel({
                 }
               />
               {data.email?.trim() ? (
-                <p className="text-xs text-gray-400 mt-1">Email cannot be changed after it is set.</p>
+                <p className="text-xs leading-relaxed break-words text-gray-400 mt-1">Email cannot be changed after it is set.</p>
               ) : null}
             </FormField>
             <FormField label="Mobile number">
@@ -635,17 +639,22 @@ export function PersonalInformationPanel({
             <input
               type="email"
               value={form.email}
-              disabled={Boolean(data.email?.trim())}
-              readOnly={Boolean(data.email?.trim())}
+              disabled={!canChangeWorkEmail && Boolean(data.email?.trim())}
+              readOnly={!canChangeWorkEmail && Boolean(data.email?.trim())}
               onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))}
               className={
-                data.email?.trim()
+                !canChangeWorkEmail && data.email?.trim()
                   ? `${inputClass} bg-gray-50 text-gray-600 cursor-not-allowed`
                   : inputClass
               }
+              autoComplete="off"
             />
-            {data.email?.trim() ? (
-              <p className="text-xs text-gray-400 mt-1">Email cannot be changed after it is set.</p>
+            {canChangeWorkEmail ? (
+              <p className="text-xs leading-relaxed break-words text-gray-400 mt-1">
+                Sign-in email for this employee.
+              </p>
+            ) : data.email?.trim() ? (
+              <p className="text-xs leading-relaxed break-words text-gray-400 mt-1">Email cannot be changed after it is set.</p>
             ) : null}
           </FormField>
           <FormField label="Position">
@@ -679,7 +688,7 @@ export function PersonalInformationPanel({
               onChange={(dateOfBirth) => setForm((prev) => ({ ...prev, dateOfBirth }))}
               minYear={1920}
             />
-            <p className="text-xs text-gray-400 mt-1">
+            <p className="text-xs leading-relaxed break-words text-gray-400 mt-1">
               Day, then month, then year — e.g. 10 September 1990.
             </p>
             {isImplausibleBirthYear(form.dateOfBirth) ? (
@@ -712,11 +721,11 @@ export function PersonalInformationPanel({
               <option value="intern">Intern</option>
             </select>
             {!canEditEmploymentType ? (
-              <p className="text-xs text-gray-400 mt-1">
+              <p className="text-xs leading-relaxed break-words text-gray-400 mt-1">
                 Only admin/HR can change employment type (affects leave probation rules).
               </p>
             ) : (
-              <p className="text-xs text-gray-400 mt-1">
+              <p className="text-xs leading-relaxed break-words text-gray-400 mt-1">
                 Interns have no paid leave for 6 months (3 internship + 3 probation). Joining on or
                 after the 20th starts that window the next month.
               </p>
@@ -802,7 +811,7 @@ export function PersonalInformationPanel({
               placeholder="personal@example.com"
               autoComplete="email"
             />
-            <p className="text-xs text-gray-400 mt-1">
+            <p className="text-xs leading-relaxed break-words text-gray-400 mt-1">
               Used for emergency contact — separate from your work login email.
             </p>
           </FormField>
@@ -884,7 +893,7 @@ export function PersonalInformationPanel({
                     ))}
                   </div>
                 ) : (
-                  <p className="text-xs text-gray-400 mt-1">No head of department selected.</p>
+                  <p className="text-xs leading-relaxed break-words text-gray-400 mt-1">No head of department selected.</p>
                 )}
               </FormField>
             </div>
@@ -900,7 +909,7 @@ export function PersonalInformationPanel({
                   className={`${inputClass} h-auto min-h-[120px] py-2 resize-y`}
                   placeholder="Private notes only you can see — passwords, links, or anything else…"
                 />
-                <p className="text-xs text-gray-400 mt-1">
+                <p className="text-xs leading-relaxed break-words text-gray-400 mt-1">
                   Only you can see this. Admins, HR, and other employees cannot access these notes.
                 </p>
               </FormField>
