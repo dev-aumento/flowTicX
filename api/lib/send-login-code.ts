@@ -7,6 +7,7 @@ export function isLoginEmailConfigured() {
 export async function sendClientLoginCodeEmail(to: string, code: string) {
   return sendMail({
     to,
+    fromName: "aaso",
     subject: "Your AASO client portal sign-in code",
     text: [
       `Your sign-in code is ${code}.`,

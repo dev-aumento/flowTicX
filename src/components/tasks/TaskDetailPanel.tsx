@@ -54,6 +54,7 @@ import {
 } from "@/components/tasks/RichTextCommentEditor";
 import { CommentRichContent } from "@/components/tasks/CommentRichContent";
 import { TaskFilesSection } from "@/components/tasks/TaskFilesSection";
+import { TaskChecklistSection } from "@/components/tasks/TaskChecklistSection";
 import { TaskCommentBubble } from "@/components/tasks/TaskCommentBubble";
 import { TaskActivityBubble } from "@/components/tasks/TaskActivityBubble";
 import { TaskCommentComposer } from "@/components/tasks/TaskCommentComposer";
@@ -779,6 +780,7 @@ function TaskPanelContent({
   const isOwner = sameUserId(task.createdBy, user?.id);
   const isAssignee = sameUserId(task.assigneeId, user?.id);
   const isParticipant = (task.participants ?? []).some((p) => sameUserId(p.id, user?.id));
+  const isObserver = (task.observers ?? []).some((p) => sameUserId(p.id, user?.id));
   const showDueDate = clientCanViewDueDate(user);
   const showTimeTracking = clientCanViewTimeTracking(user);
   /** Full task edits (deadline, priority, estimate, files, etc.). */
@@ -1846,6 +1848,12 @@ function TaskPanelContent({
               </div>
               </div>
             </section>
+
+            <TaskChecklistSection
+              taskId={taskId}
+              items={task.subtasks ?? []}
+              canEdit={canManage || isParticipant || isObserver}
+            />
 
             <TaskFilesSection taskId={taskId} canManage={canManage} />
 

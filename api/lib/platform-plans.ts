@@ -1,6 +1,12 @@
 import { Collections } from "@db/mongo/collections";
 import type { SubscriptionPlanDoc } from "@db/mongo/types";
-import { DEFAULT_PLATFORM_PLANS, slugifyPlanName, type PlatformPlan } from "@/lib/platform-admin";
+import {
+  DEFAULT_PLATFORM_PLANS,
+  durationDaysForInterval,
+  planBillingInterval,
+  slugifyPlanName,
+  type PlatformPlan,
+} from "@/lib/platform-admin";
 import {
   deriveFeatureKeys,
   resolvePlanEntitlement,
@@ -29,6 +35,8 @@ function toPlan(doc: SubscriptionPlanDoc): PlatformPlan & { id: number } {
     slug: doc.slug,
     name: showPresetCopy && doc.slug === "trial" ? preset.name : doc.name,
     amount: doc.amount,
+    amountUsd: typeof doc.amountUsd === "number" ? doc.amountUsd : 0,
+    billingInterval: planBillingInterval(doc),
     description: showPresetCopy && doc.slug === "trial" ? preset.description : doc.description,
     durationDays: doc.durationDays,
     featureKeys: deriveFeatureKeys(entitlement.highlightKeys, entitlement.limits),
@@ -67,6 +75,8 @@ export async function listPlatformPlans(): Promise<Array<PlatformPlan & { id: nu
           slug: plan.slug,
           name: plan.name,
           amount: plan.amount,
+          amountUsd: plan.amountUsd,
+          billingInterval: plan.billingInterval,
           description: plan.description,
           durationDays: plan.durationDays,
           featureKeys: plan.featureKeys,
@@ -95,6 +105,8 @@ export async function listPlatformPlans(): Promise<Array<PlatformPlan & { id: nu
       slug: plan.slug,
       name: plan.name,
       amount: plan.amount,
+      amountUsd: plan.amountUsd,
+      billingInterval: plan.billingInterval,
       description: plan.description,
       durationDays: plan.durationDays,
       featureKeys: plan.featureKeys,
@@ -129,8 +141,10 @@ export async function upsertPlatformPlan(input: {
   id?: number;
   name: string;
   amount: number;
+  amountUsd: number;
+  billingInterval: "month" | "year";
   description: string;
-  durationDays: number;
+  durationDays?: number;
   limits: PlanLimits;
   highlightKeys: string[];
   badge: string | null;
@@ -154,6 +168,9 @@ export async function upsertPlatformPlan(input: {
   const badge = input.badge?.trim() || null;
   const ctaLabel = input.ctaLabel.trim() || "Select plan";
   const storageLabel = input.storageLabel?.trim() || null;
+  const billingInterval = input.billingInterval === "year" ? "year" : "month";
+  const durationDays = durationDaysForInterval(billingInterval);
+  const amountUsd = input.amountUsd;
   const existing = await listPlatformPlans();
   const featureKeys = deriveFeatureKeys(highlightKeys, limits, existing);
 
@@ -175,8 +192,10 @@ export async function upsertPlatformPlan(input: {
     const updated = await updateById<SubscriptionPlanDoc>(Collections.subscriptionPlans, current.id, {
       name,
       amount: input.amount,
+      amountUsd,
+      billingInterval,
       description,
-      durationDays: input.durationDays,
+      durationDays,
       ...entitlementFields,
       updatedAt: now,
     });
@@ -187,6 +206,9 @@ export async function upsertPlatformPlan(input: {
   }
 
   let slug = slugifyPlanName(name);
+  if (billingInterval === "year" && !slug.endsWith("-yearly")) {
+    slug = `${slug}-yearly`;
+  }
   const clash = await col.findOne({ slug });
   if (clash) slug = `${slug}-${Date.now().toString().slice(-4)}`;
   const last = await col.find({}).sort({ sortOrder: -1 }).limit(1).next();
@@ -194,8 +216,10 @@ export async function upsertPlatformPlan(input: {
     slug,
     name,
     amount: input.amount,
+    amountUsd,
+    billingInterval,
     description,
-    durationDays: input.durationDays,
+    durationDays,
     sortOrder: (last?.sortOrder ?? 0) + 1,
     ...entitlementFields,
     createdAt: now,

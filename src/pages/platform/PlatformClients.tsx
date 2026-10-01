@@ -18,7 +18,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { trpc } from "@/providers/trpc";
-import { formatInr, planLabel } from "@/lib/platform-admin";
+import { formatInr, planChoiceLabel, planLabel } from "@/lib/platform-admin";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -183,7 +183,7 @@ export default function PlatformClients() {
 
   const planOptions = (catalog ?? []).map((plan) => ({
     value: plan.slug,
-    label: plan.name,
+    label: planChoiceLabel(plan),
   }));
 
   return (

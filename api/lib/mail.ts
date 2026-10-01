@@ -28,11 +28,28 @@ export function getMailer() {
   return transporter;
 }
 
+function mailboxAddress() {
+  const raw = (process.env.SMTP_FROM || process.env.SMTP_USER || "").trim();
+  const wrapped = raw.match(/<([^>]+)>/);
+  return (wrapped?.[1] ?? raw).replace(/^"|"$/g, "").trim();
+}
+
+/** Inbox name: the person, then their email, then aaso. Never the no-reply mailbox. */
+export function senderDisplayName(name?: string | null, email?: string | null) {
+  const cleanedName = (name ?? "").replace(/[\r\n"]/g, "").trim();
+  if (cleanedName && !/no-reply@/i.test(cleanedName)) return cleanedName;
+  const cleanedEmail = (email ?? "").replace(/[\r\n"]/g, "").trim();
+  if (cleanedEmail && !/no-reply@/i.test(cleanedEmail)) return cleanedEmail;
+  return "aaso";
+}
+
 export async function sendMail(input: {
   to: string;
   subject: string;
   text: string;
   html?: string;
+  fromName?: string | null;
+  fromEmail?: string | null;
   attachments?: Array<{
     filename: string;
     content: Buffer;
@@ -43,8 +60,16 @@ export async function sendMail(input: {
   const mailer = getMailer();
   if (!mailer) return { delivered: false as const };
 
+  const address = mailboxAddress();
   await mailer.sendMail({
-    from: process.env.SMTP_FROM,
+    from: {
+      name: senderDisplayName(input.fromName, input.fromEmail),
+      address,
+    },
+    envelope: {
+      from: address,
+      to: input.to,
+    },
     to: input.to,
     subject: input.subject,
     text: input.text,

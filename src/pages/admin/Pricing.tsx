@@ -1,8 +1,20 @@
+import { useEffect, useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { trpc } from "@/providers/trpc";
-import { formatInr, formatPlanDate, formatPlanDuration, statusLabel } from "@/lib/platform-admin";
+import {
+  detectPlanCurrency,
+  formatPlanDate,
+  formatPlanDuration,
+  formatPlanMoney,
+  planBillingInterval,
+  planIntervalLabel,
+  planPriceForCurrency,
+  statusLabel,
+  type PlanBillingInterval,
+} from "@/lib/platform-admin";
 import { isPopularPlan } from "@/lib/plan-entitlements";
 import { PlanPricingCard } from "@/components/billing/PlanPricingCard";
+import { PlanIntervalTabs } from "@/components/billing/PlanIntervalTabs";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -22,7 +34,22 @@ export default function AdminPricing() {
     onError: (error) => toast.error(error.message),
   });
 
+  const currency = detectPlanCurrency();
+  const [interval, setInterval] = useState<PlanBillingInterval>("month");
+  const [syncedInterval, setSyncedInterval] = useState(false);
   const currentSlug = current?.plan ?? "";
+  const activePlan = (plans ?? []).find((plan) => plan.slug === currentSlug);
+
+  useEffect(() => {
+    if (syncedInterval || !activePlan) return;
+    setInterval(planBillingInterval(activePlan));
+    setSyncedInterval(true);
+  }, [activePlan, syncedInterval]);
+
+  const visiblePlans = useMemo(
+    () => (plans ?? []).filter((plan) => planBillingInterval(plan) === interval),
+    [plans, interval],
+  );
 
   return (
     <div className="space-y-6">
@@ -48,22 +75,36 @@ export default function AdminPricing() {
               {statusLabel(current.planStatus)}
             </span>
             <p className="text-sm text-[#6B7280]">
-              {formatInr(current.subscriptionAmount)} ·{" "}
-              {current.durationDays ? formatPlanDuration(current.durationDays) : "Custom"}
+              {formatPlanMoney(
+                activePlan
+                  ? planPriceForCurrency(activePlan, currency)
+                  : currency === "INR"
+                    ? current.subscriptionAmount
+                    : 0,
+                currency,
+              )}
+              {activePlan ? ` · ${planIntervalLabel(planBillingInterval(activePlan))}` : ""}
+              {current.durationDays ? ` · ${formatPlanDuration(current.durationDays)}` : ""}
               {current.planExpiresAt ? ` · Ends ${formatPlanDate(current.planExpiresAt)}` : ""}
             </p>
           </div>
         </section>
       ) : null}
 
+      <PlanIntervalTabs value={interval} onChange={setInterval} />
+
       {isLoading ? (
         <div className="flex min-h-[30vh] items-center justify-center text-[#6B7280]">
           <Loader2 className="mr-2 h-5 w-5 animate-spin" />
           Loading pricing plans...
         </div>
+      ) : visiblePlans.length === 0 ? (
+        <p className="rounded-2xl border border-dashed border-[#E6E8EC] px-5 py-10 text-center text-sm text-[#6B7280] dark:border-[#334155]">
+          No {interval === "year" ? "yearly" : "monthly"} plans are available yet.
+        </p>
       ) : (
         <div className="grid items-stretch gap-5 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
-          {(plans ?? []).map((plan) => {
+          {visiblePlans.map((plan) => {
             const selected = plan.slug === currentSlug;
             const featured = isPopularPlan(plan);
             return (
@@ -71,6 +112,7 @@ export default function AdminPricing() {
                 key={plan.slug}
                 plan={plan}
                 selected={selected}
+                currency={currency}
                 action={
                   <button
                     type="button"

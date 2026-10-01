@@ -1,6 +1,13 @@
 import type { ReactNode } from "react";
 import { Check } from "lucide-react";
-import { formatInr, planPriceSuffix, type PlatformPlan } from "@/lib/platform-admin";
+import {
+  formatPlanMoney,
+  formatUsd,
+  planPriceForCurrency,
+  planPriceSuffix,
+  type PlanDisplayCurrency,
+  type PlatformPlan,
+} from "@/lib/platform-admin";
 import { isPopularPlan, planChecklist, teamMemberLabel } from "@/lib/plan-entitlements";
 import { cn } from "@/lib/utils";
 
@@ -8,6 +15,8 @@ export function PlanPricingCard({
   plan,
   selected = false,
   plain = false,
+  currency = "INR",
+  showBothCurrencies = false,
   action,
   footer,
 }: {
@@ -15,6 +24,10 @@ export function PlanPricingCard({
   selected?: boolean;
   /** Master admin catalog: no marketing badge or highlighted border. */
   plain?: boolean;
+  /** Currency shown to the signed-in viewer. Ignored when both prices are shown. */
+  currency?: PlanDisplayCurrency;
+  /** Master admin catalog shows the INR price and the USD price together. */
+  showBothCurrencies?: boolean;
   action?: ReactNode;
   footer?: ReactNode;
 }) {
@@ -50,9 +63,15 @@ export function PlanPricingCard({
       <p className="mt-1 min-h-10 text-sm leading-5 text-[#6B7280]">{plan.description}</p>
 
       <p className="mt-4 text-[32px] font-bold leading-none tracking-tight text-[#111827] dark:text-white">
-        {formatInr(plan.amount)}
+        {formatPlanMoney(planPriceForCurrency(plan, showBothCurrencies ? "INR" : currency), showBothCurrencies ? "INR" : currency)}
         <span className="ml-1 text-sm font-medium text-[#6B7280]">{planPriceSuffix(plan.durationDays)}</span>
       </p>
+      {showBothCurrencies ? (
+        <p className="mt-1.5 text-sm font-medium text-[#6B7280]">
+          {formatUsd(plan.amountUsd ?? 0)}
+          <span className="ml-1">{planPriceSuffix(plan.durationDays)}</span>
+        </p>
+      ) : null}
       <p className="mt-2 text-sm font-medium text-[#111827] dark:text-slate-200">
         {teamMemberLabel(plan.limits.teamMembers)}
       </p>

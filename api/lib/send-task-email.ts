@@ -1,19 +1,38 @@
 import { Collections } from "@db/mongo/collections";
-import type { NotificationDoc, ProjectDoc, SafeUser, TaskDoc, TaskStatus, UserDoc } from "@db/mongo/types";
+import type { NotificationDoc, ProjectDoc, SafeUser, TaskDoc, TaskPriority, UserDoc } from "@db/mongo/types";
 import { formatDueLabel } from "@/lib/task-deadline";
 import { formatWorkZoneDateTime } from "@/lib/timezone";
 import { getAvatarColor, getInitials } from "@/lib/utils";
 import { findById, getCollection } from "../queries/connection";
-import { isMailConfigured, sendMail } from "./mail";
+import { isMailConfigured, senderDisplayName, sendMail } from "./mail";
 import { publicAppOrigin } from "./request-origin";
 
-export type TaskEmailKind = "assign" | "status" | "overdue" | "comment" | "mention";
+export type TaskEmailKind =
+  | "assign"
+  | "status"
+  | "overdue"
+  | "comment"
+  | "mention"
+  | "completed"
+  | "participant"
+  | "updated";
 
-const STATUS_LABELS: Record<TaskStatus, string> = {
-  todo: "Not started",
-  in_progress: "In Progress",
-  review: "Pause",
-  done: "Complete",
+const ACTIVITY_COLORS: Record<TaskEmailKind, string> = {
+  assign: "#2563EB",
+  comment: "#059669",
+  mention: "#7C3AED",
+  status: "#D97706",
+  overdue: "#DC2626",
+  completed: "#0F766E",
+  participant: "#4F46E5",
+  updated: "#0369A1",
+};
+
+const PRIORITY_COLORS: Record<TaskPriority, string> = {
+  low: "#6B7280",
+  medium: "#2563EB",
+  high: "#EA580C",
+  urgent: "#DC2626",
 };
 
 export function taskEmailKind(
@@ -22,9 +41,24 @@ export function taskEmailKind(
 ): TaskEmailKind | null {
   if (type === "task_assigned") return "assign";
   if (type === "deadline_reminder") return "overdue";
+  if (title === "Task marked finished") return "completed";
   if (title === "Task status changed") return "status";
   if (title === "New comment on task") return "comment";
   if (title === "You were mentioned in a comment") return "mention";
+  if (title === "Added as participant") return "participant";
+  if (
+    title === "Task renamed" ||
+    title === "Task stage changed" ||
+    title === "Task marked urgent" ||
+    title === "Task priority changed" ||
+    title === "Task reassigned" ||
+    title === "Task updated" ||
+    title === "Task owner changed" ||
+    title === "Task deadline updated" ||
+    title === "Task assignee changed"
+  ) {
+    return "updated";
+  }
   return null;
 }
 
@@ -75,6 +109,9 @@ function subjectFor(kind: TaskEmailKind, actorName: string, taskTitle: string) {
   if (kind === "status") return `${actorName} updated the status of “${taskTitle}”`;
   if (kind === "overdue") return `“${taskTitle}” is overdue`;
   if (kind === "mention") return `${actorName} mentioned you on “${taskTitle}”`;
+  if (kind === "completed") return `${actorName} marked “${taskTitle}” as finished`;
+  if (kind === "participant") return `${actorName} added you as a participant on “${taskTitle}”`;
+  if (kind === "updated") return `${actorName} updated “${taskTitle}”`;
   return `${actorName} commented on “${taskTitle}”`;
 }
 
@@ -83,6 +120,9 @@ function headlineFor(kind: TaskEmailKind, actorName: string) {
   if (kind === "status") return `${actorName} updated the task status`;
   if (kind === "overdue") return "This task is overdue";
   if (kind === "mention") return `${actorName} mentioned you`;
+  if (kind === "completed") return `${actorName} marked this task as finished`;
+  if (kind === "participant") return `${actorName} added you as a participant`;
+  if (kind === "updated") return `${actorName} updated this task`;
   return `${actorName} added a comment`;
 }
 
@@ -151,11 +191,11 @@ function avatarHtml(name: string, avatar: string | null, origin: string, size: n
   };
 }
 
-function detailRow(label: string, value: string) {
+function detailRow(label: string, value: string, valueColor = "#111827") {
   if (!value) return "";
   return `<tr>
     <td style="padding:4px 16px 4px 0;font-family:Arial,sans-serif;font-size:13px;line-height:20px;color:#6b7280;white-space:nowrap;vertical-align:top;">${escapeHtml(label)}</td>
-    <td style="padding:4px 0;font-family:Arial,sans-serif;font-size:13px;line-height:20px;color:#111827;vertical-align:top;">${escapeHtml(value)}</td>
+    <td style="padding:4px 0;font-family:Arial,sans-serif;font-size:13px;line-height:20px;font-weight:700;color:${valueColor};vertical-align:top;">${escapeHtml(value)}</td>
   </tr>`;
 }
 
@@ -165,23 +205,28 @@ function buildEmail(input: {
   headline: string;
   taskTitle: string;
   projectName: string;
-  status: string;
   priority: string;
+  priorityColor: string;
+  accent: string;
   due: string;
   description: string;
   comment: string;
+  note: string;
   when: string;
   link: string;
   logoUrl: string;
 }) {
   const button = input.link
-    ? `<a href="${escapeHtml(input.link)}" style="display:inline-block;background:#2563EB;color:#ffffff;font-family:Arial,sans-serif;font-size:14px;font-weight:700;line-height:20px;text-decoration:none;padding:10px 16px;border-radius:6px;">View in AASO</a>`
+    ? `<a href="${escapeHtml(input.link)}" style="display:inline-block;background:${input.accent};color:#ffffff;font-family:Arial,sans-serif;font-size:14px;font-weight:700;line-height:20px;text-decoration:none;padding:10px 16px;border-radius:6px;">View in AASO</a>`
     : "";
   const footerLink = input.link
-    ? `<tr><td style="padding:14px 20px 16px;border-top:1px solid #e5e7eb;font-family:Arial,sans-serif;font-size:14px;"><a href="${escapeHtml(input.link)}" style="color:#2563EB;text-decoration:none;">View in AASO</a></td></tr>`
+    ? `<tr><td style="padding:14px 20px 16px;border-top:1px solid #e5e7eb;font-family:Arial,sans-serif;font-size:14px;"><a href="${escapeHtml(input.link)}" style="color:${input.accent};text-decoration:none;">View in AASO</a></td></tr>`
     : "";
   const comment = input.comment
-    ? `<p style="margin:14px 0 0;font-family:Arial,sans-serif;font-size:14px;line-height:22px;color:#1d4ed8;">${escapeHtml(input.comment)}</p>`
+    ? `<p style="margin:14px 0 0;font-family:Arial,sans-serif;font-size:14px;line-height:22px;color:${input.accent};">${escapeHtml(input.comment)}</p>`
+    : "";
+  const note = input.note
+    ? `<p style="margin:14px 0 0;font-family:Arial,sans-serif;font-size:14px;line-height:22px;color:#111827;">${escapeHtml(input.note)}</p>`
     : "";
   const logo = input.logoUrl
     ? `<img src="${escapeHtml(input.logoUrl)}" width="28" height="28" alt="" style="display:inline-block;vertical-align:middle;border:0;" />`
@@ -210,7 +255,7 @@ function buildEmail(input: {
             <td style="padding:0 4px 4px;font-family:Arial,sans-serif;font-size:16px;line-height:24px;color:#111827;">Your unread notifications</td>
           </tr>
           <tr>
-            <td style="padding:0 4px 2px;font-family:Arial,sans-serif;font-size:22px;line-height:28px;font-weight:700;color:#111827;">${escapeHtml(input.headline)}</td>
+            <td style="padding:0 4px 2px;font-family:Arial,sans-serif;font-size:22px;line-height:28px;font-weight:700;color:${input.accent};">${escapeHtml(input.headline)}</td>
           </tr>
           <tr>
             <td style="padding:0 4px 16px;font-family:Arial,sans-serif;font-size:14px;line-height:20px;color:#6b7280;">${escapeHtml(input.projectName || "AASO")}</td>
@@ -218,13 +263,13 @@ function buildEmail(input: {
           ${button ? `<tr><td style="padding:0 4px 22px;">${button}</td></tr>` : ""}
           <tr>
             <td>
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #e5e7eb;border-left:4px solid ${input.accent};border-radius:12px;">
                 <tr>
                   <td style="padding:18px 20px 8px;">
                     <table role="presentation" cellpadding="0" cellspacing="0">
                       <tr>
                         <td valign="top" style="padding-right:12px;">${input.avatar.html}</td>
-                        <td valign="middle" style="font-family:Arial,sans-serif;font-size:16px;line-height:22px;font-weight:700;color:#111827;">${escapeHtml(input.headline)}</td>
+                        <td valign="middle" style="font-family:Arial,sans-serif;font-size:16px;line-height:22px;font-weight:700;color:${input.accent};">${escapeHtml(input.headline)}</td>
                       </tr>
                     </table>
                   </td>
@@ -238,13 +283,13 @@ function buildEmail(input: {
                 <tr>
                   <td style="padding:4px 20px 8px;">
                     <table role="presentation" cellpadding="0" cellspacing="0">
-                      ${detailRow("Status", input.status)}
-                      ${detailRow("Priority", input.priority)}
+                      ${detailRow("Priority", input.priority, input.priorityColor)}
                       ${detailRow("Due", input.due)}
                       ${detailRow("Project", input.projectName)}
                       ${input.description ? detailRow("Description", input.description) : ""}
                     </table>
                     ${comment}
+                    ${note}
                   </td>
                 </tr>
                 ${footerLink}
@@ -262,11 +307,11 @@ function buildEmail(input: {
     input.headline,
     input.taskTitle,
     input.projectName ? `Project: ${input.projectName}` : "",
-    input.status ? `Status: ${input.status}` : "",
     input.priority ? `Priority: ${input.priority}` : "",
     input.due ? `Due: ${input.due}` : "",
     input.description ? `Description: ${input.description}` : "",
     input.comment ? input.comment : "",
+    input.note ? input.note : "",
     `${input.actorName} · ${input.when}`,
     input.link ? `View in AASO: ${input.link}` : "",
   ]
@@ -303,43 +348,55 @@ export async function sendTaskNotificationEmails(input: {
     task?.projectId != null ? await findById<ProjectDoc>(Collections.projects, task.projectId) : null;
   const projectName = project?.name?.trim() || "";
 
-  let actorName = input.actor?.name?.trim() || input.actor?.email?.trim() || "Someone";
+  let personName = input.actor?.name?.trim() || "";
+  let personEmail = input.actor?.email?.trim() || "";
   let actorAvatar = input.actor?.avatar ?? null;
   if (input.actor?.id) {
     const actorUser = await findById<UserDoc>(Collections.users, input.actor.id);
     if (actorUser) {
-      actorName = actorUser.name?.trim() || actorUser.email?.trim() || actorName;
+      personName = actorUser.name?.trim() || personName;
+      personEmail = actorUser.email?.trim() || personEmail;
       actorAvatar = actorUser.avatar ?? actorAvatar;
     }
   }
+  const senderName = senderDisplayName(personName, personEmail);
 
   const link = origin ? `${origin}${taskPath(input.taskId, projectName, input.activityId ?? null)}` : "";
-  const avatar = avatarHtml(actorName, actorAvatar, origin, 40);
+  const avatar = avatarHtml(senderName, actorAvatar, origin, 40);
   const due = task?.dueDate ? formatDueLabel(task.dueDate) : "No due date";
   const description = clip(plainText(task?.description), 360);
   const comment = clip(commentBody(input.kind, input.message), 500);
+  const note =
+    input.kind === "completed" || input.kind === "participant" || input.kind === "updated"
+      ? clip(plainText(input.message), 500)
+      : "";
+  const priorityKey = task?.priority;
   const email = buildEmail({
-    actorName,
+    actorName: senderName,
     avatar,
-    headline: headlineFor(input.kind, actorName),
+    headline: headlineFor(input.kind, senderName),
     taskTitle,
     projectName,
-    status: task ? STATUS_LABELS[task.status] ?? labelize(task.status) : "",
-    priority: task?.priority ? labelize(task.priority) : "",
+    priority: priorityKey ? labelize(priorityKey) : "",
+    priorityColor: priorityKey ? PRIORITY_COLORS[priorityKey] : "#111827",
+    accent: ACTIVITY_COLORS[input.kind],
     due,
     description,
     comment,
+    note,
     when: formatWorkZoneDateTime(new Date()),
     link,
     logoUrl: origin ? `${origin}/aaso-favicon.png` : "",
   });
-  const subject = subjectFor(input.kind, actorName, taskTitle);
+  const subject = subjectFor(input.kind, senderName, taskTitle);
 
   await Promise.all(
     recipients.map(async (user) => {
       try {
         await sendMail({
           to: user.email!.trim(),
+          fromName: personName,
+          fromEmail: personEmail,
           subject,
           text: email.text,
           html: email.html,

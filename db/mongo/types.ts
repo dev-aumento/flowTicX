@@ -174,7 +174,12 @@ export type SubscriptionPlanDoc = {
   id: number;
   slug: string;
   name: string;
+  /** Price in INR. */
   amount: number;
+  /** Price in USD for people outside India. */
+  amountUsd?: number | null;
+  /** month = 30 days, year = 365 days. Missing values follow durationDays. */
+  billingInterval?: "month" | "year" | null;
   description: string;
   durationDays: number;
   featureKeys: string[];

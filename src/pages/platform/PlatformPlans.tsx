@@ -2,7 +2,13 @@ import { useMemo, useState } from "react";
 import { Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
 import { trpc } from "@/providers/trpc";
 import { PlanPricingCard } from "@/components/billing/PlanPricingCard";
+import { PlanIntervalTabs } from "@/components/billing/PlanIntervalTabs";
 import { PLAN_HIGHLIGHTS } from "@/lib/plan-entitlements";
+import {
+  planBillingInterval,
+  planIntervalLabel,
+  type PlanBillingInterval,
+} from "@/lib/platform-admin";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
@@ -12,8 +18,9 @@ type PlanForm = {
   id?: number;
   name: string;
   amount: string;
+  amountUsd: string;
+  billingInterval: PlanBillingInterval;
   description: string;
-  durationDays: string;
   badge: string;
   ctaLabel: string;
   storageLabel: string;
@@ -29,8 +36,9 @@ type PlanForm = {
 const EMPTY_FORM: PlanForm = {
   name: "",
   amount: "0",
+  amountUsd: "0",
+  billingInterval: "month",
   description: "",
-  durationDays: "30",
   badge: "",
   ctaLabel: "Select plan",
   storageLabel: "",
@@ -57,6 +65,7 @@ export default function PlatformPlans() {
   const { data: plans, isLoading } = trpc.platform.plans.useQuery();
   const { data: overview } = trpc.platform.overview.useQuery();
   const [form, setForm] = useState<PlanForm | null>(null);
+  const [interval, setInterval] = useState<PlanBillingInterval>("month");
 
   const upsert = trpc.platform.upsertPlan.useMutation({
     onSuccess: async (result) => {
@@ -74,6 +83,7 @@ export default function PlatformPlans() {
           ? `Plan saved. ${updated} subscribed client${updated === 1 ? "" : "s"} updated to ${result.durationDays} days.`
           : "Plan saved",
       );
+      setInterval(planBillingInterval(result));
       setForm(null);
     },
     onError: (error) => toast.error(error.message),
@@ -94,21 +104,26 @@ export default function PlatformPlans() {
     return map;
   }, [overview]);
 
+  const visiblePlans = useMemo(
+    () => (plans ?? []).filter((plan) => planBillingInterval(plan) === interval),
+    [plans, interval],
+  );
+
   function save() {
     if (!form) return;
     const name = form.name.trim();
     const amount = Number(form.amount);
-    const durationDays = Number(form.durationDays);
+    const amountUsd = Number(form.amountUsd);
     if (!name) {
       toast.error("Enter a plan name");
       return;
     }
     if (!Number.isFinite(amount) || amount < 0) {
-      toast.error("Enter a valid price");
+      toast.error("Enter a valid INR price");
       return;
     }
-    if (!Number.isInteger(durationDays) || durationDays < 1) {
-      toast.error("Enter duration in days");
+    if (!Number.isFinite(amountUsd) || amountUsd < 0) {
+      toast.error("Enter a valid USD price");
       return;
     }
     const ctaLabel = form.ctaLabel.trim();
@@ -131,8 +146,9 @@ export default function PlatformPlans() {
       id: form.id,
       name,
       amount,
+      amountUsd,
+      billingInterval: form.billingInterval,
       description: form.description.trim(),
-      durationDays,
       limits,
       highlightKeys: form.highlightKeys,
       badge: form.badge.trim() || null,
@@ -149,13 +165,13 @@ export default function PlatformPlans() {
             Subscription Plans
           </h1>
           <p className="mt-1 max-w-2xl text-sm text-[#6B7280]">
-            Set the price, project limit, team size, storage, and the checklist for each plan. Saved items
-            apply to admins, project managers, employees, and the client portal.
+            Set an INR price and a USD price for each plan. People in India see INR. Everyone else sees USD.
+            Monthly and yearly plans are listed on separate tabs.
           </p>
         </div>
         <button
           type="button"
-          onClick={() => setForm({ ...EMPTY_FORM, highlightKeys: [] })}
+          onClick={() => setForm({ ...EMPTY_FORM, billingInterval: interval, highlightKeys: [] })}
           className="inline-flex h-11 items-center gap-2 rounded-xl bg-[#2563EB] px-4 text-sm font-semibold text-white hover:bg-[#1D4ED8]"
         >
           <Plus size={16} />
@@ -193,21 +209,36 @@ export default function PlatformPlans() {
                 id="plan-price"
                 type="number"
                 min={0}
+                step="1"
                 value={form.amount}
                 onChange={(event) => setForm({ ...form, amount: event.target.value })}
                 className="h-11 rounded-xl"
               />
+              <p className="text-xs text-[#6B7280]">Shown to people in India.</p>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="plan-duration">Duration (days)</Label>
+              <Label htmlFor="plan-price-usd">Price (USD)</Label>
               <Input
-                id="plan-duration"
+                id="plan-price-usd"
                 type="number"
-                min={1}
-                value={form.durationDays}
-                onChange={(event) => setForm({ ...form, durationDays: event.target.value })}
+                min={0}
+                step="0.01"
+                value={form.amountUsd}
+                onChange={(event) => setForm({ ...form, amountUsd: event.target.value })}
                 className="h-11 rounded-xl"
               />
+              <p className="text-xs text-[#6B7280]">Shown to people outside India.</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Billing period</Label>
+              <PlanIntervalTabs
+                value={form.billingInterval}
+                onChange={(billingInterval) => setForm({ ...form, billingInterval })}
+              />
+              <p className="text-xs text-[#6B7280]">
+                {planIntervalLabel(form.billingInterval)} plans renew every{" "}
+                {form.billingInterval === "year" ? "year" : "month"}.
+              </p>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="plan-cta">Button label</Label>
@@ -345,20 +376,28 @@ export default function PlatformPlans() {
         </section>
       ) : null}
 
+      <PlanIntervalTabs value={interval} onChange={setInterval} />
+
       {isLoading ? (
         <div className="flex items-center justify-center py-16 text-[#6B7280]">
           <Loader2 className="mr-2 h-5 w-5 animate-spin" />
           Loading plans...
         </div>
+      ) : visiblePlans.length === 0 ? (
+        <p className="rounded-2xl border border-dashed border-[#E6E8EC] px-5 py-10 text-center text-sm text-[#6B7280] dark:border-[#334155]">
+          No {interval === "year" ? "yearly" : "monthly"} plans yet. Add a plan to set{" "}
+          {interval === "year" ? "yearly" : "monthly"} prices.
+        </p>
       ) : (
         <div className="grid items-stretch gap-5 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
-          {(plans ?? []).map((plan) => {
+          {visiblePlans.map((plan) => {
             const count = counts.get(plan.slug) ?? 0;
             return (
               <PlanPricingCard
                 key={plan.slug}
                 plan={plan}
                 plain
+                showBothCurrencies
                 footer={
                   <div className="flex items-center justify-between gap-3">
                     <p className="text-sm text-[#2563EB]">
@@ -371,8 +410,9 @@ export default function PlatformPlans() {
                           id: plan.id,
                           name: plan.name,
                           amount: String(plan.amount),
+                          amountUsd: String(plan.amountUsd ?? 0),
+                          billingInterval: planBillingInterval(plan),
                           description: plan.description,
-                          durationDays: String(plan.durationDays),
                           badge: plan.badge ?? "",
                           ctaLabel: plan.ctaLabel,
                           storageLabel: plan.storageLabel ?? "",

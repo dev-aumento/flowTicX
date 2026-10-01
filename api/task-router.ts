@@ -37,7 +37,7 @@ import type {
   NotificationDoc,
   SafeUser,
 } from "@db/mongo/types";
-import { PIPELINE_STAGE_KEY_REGEX, legacyStatusToStage, isMarkingTaskComplete } from "@/lib/task-kanban";
+import { PIPELINE_STAGE_KEY_REGEX, legacyStatusToStage, isCompletedTask, isMarkingTaskComplete } from "@/lib/task-kanban";
 import { extractMentionedUserIds, formatCommentPreview } from "@/lib/task-comment-mentions";
 import { extractMentionedUserIdsFromComment, richCommentPlainText } from "@/lib/rich-comment";
 import { parseMeetingComment } from "@/lib/workspace-meetings";
@@ -773,6 +773,7 @@ export const taskRouter = createRouter({
       const now = new Date();
       const label = actorLabel(ctx.user);
       const taskTitle = patch.title ?? oldTask.title;
+      const markingComplete = isMarkingTaskComplete(data) && !isCompletedTask(oldTask);
 
       if (data.title !== undefined && data.title !== oldTask.title) {
         await insertDoc<TaskActivityDoc>(Collections.taskActivity, {
@@ -804,13 +805,15 @@ export const taskRouter = createRouter({
           metadata: null,
           createdAt: now,
         });
-        await notifyTaskMembers({
-          taskId: id,
-          actor: ctx.user,
-          type: "task_updated",
-          title: "Task status changed",
-          message: `${label} changed "${taskTitle}" to ${data.status.replace(/_/g, " ")}`,
-        });
+        if (!markingComplete) {
+          await notifyTaskMembers({
+            taskId: id,
+            actor: ctx.user,
+            type: "task_updated",
+            title: "Task status changed",
+            message: `${label} changed "${taskTitle}" to ${data.status.replace(/_/g, " ")}`,
+          });
+        }
       }
 
       if (data.stage && data.stage !== oldTask.stage) {
@@ -823,12 +826,26 @@ export const taskRouter = createRouter({
           metadata: null,
           createdAt: now,
         });
+        if (!markingComplete) {
+          await notifyTaskMembers({
+            taskId: id,
+            actor: ctx.user,
+            type: "task_updated",
+            title: "Task stage changed",
+            message: `${label} moved "${taskTitle}" to ${data.stage}`,
+          });
+        }
+      }
+
+      if (markingComplete) {
         await notifyTaskMembers({
           taskId: id,
           actor: ctx.user,
           type: "task_updated",
-          title: "Task stage changed",
-          message: `${label} moved "${taskTitle}" to ${data.stage}`,
+          title: "Task marked finished",
+          message: `${label} marked "${taskTitle}" as finished`,
+          extraRecipientIds: oldTask.assigneeId != null ? [oldTask.assigneeId] : [],
+          includeParticipants: true,
         });
       }
 
@@ -1114,8 +1131,14 @@ export const taskRouter = createRouter({
           taskId: input.id,
           actor: ctx.user,
           type: "task_updated",
-          title: "Task status changed",
-          message: `${actorLabel(ctx.user)} changed "${oldTask.title}" to ${input.status.replace(/_/g, " ")}`,
+          title: input.status === "done" ? "Task marked finished" : "Task status changed",
+          message:
+            input.status === "done"
+              ? `${actorLabel(ctx.user)} marked "${oldTask.title}" as finished`
+              : `${actorLabel(ctx.user)} changed "${oldTask.title}" to ${input.status.replace(/_/g, " ")}`,
+          extraRecipientIds:
+            input.status === "done" && oldTask.assigneeId != null ? [oldTask.assigneeId] : [],
+          includeParticipants: input.status === "done",
         });
       }
 

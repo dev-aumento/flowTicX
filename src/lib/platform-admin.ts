@@ -37,11 +37,18 @@ export const PLAN_FEATURE_CATALOG: PlanFeature[] = [
   { key: "permissions", label: "Roles & permissions", description: "Fine-grained access control" },
 ];
 
+export type PlanBillingInterval = "month" | "year";
+export type PlanDisplayCurrency = "INR" | "USD";
+
 export type PlatformPlan = {
   id?: number;
   slug: string;
   name: string;
+  /** Price in INR for this billing period. */
   amount: number;
+  /** Price in USD for this billing period. */
+  amountUsd: number;
+  billingInterval: PlanBillingInterval;
   description: string;
   durationDays: number;
   featureKeys: string[];
@@ -66,6 +73,8 @@ function catalogPlan(
     slug,
     name,
     amount,
+    amountUsd: 0,
+    billingInterval: "month",
     description,
     durationDays: 30,
     featureKeys: deriveFeatureKeys(entitlement.highlightKeys, entitlement.limits),
@@ -99,6 +108,66 @@ export function formatInr(amount: number) {
     currency: "INR",
     maximumFractionDigits: 0,
   }).format(amount);
+}
+
+export function formatUsd(amount: number) {
+  const hasCents = Math.round(amount * 100) % 100 !== 0;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: hasCents ? 2 : 0,
+    maximumFractionDigits: hasCents ? 2 : 0,
+  }).format(amount);
+}
+
+export function formatPlanMoney(amount: number, currency: PlanDisplayCurrency) {
+  return currency === "USD" ? formatUsd(amount) : formatInr(amount);
+}
+
+export function planBillingInterval(plan: {
+  billingInterval?: string | null;
+  durationDays?: number | null;
+}): PlanBillingInterval {
+  if (plan.billingInterval === "year" || plan.billingInterval === "month") {
+    return plan.billingInterval;
+  }
+  const days = plan.durationDays ?? 30;
+  return days > 0 && days % 365 === 0 ? "year" : "month";
+}
+
+export function durationDaysForInterval(interval: PlanBillingInterval) {
+  return interval === "year" ? 365 : 30;
+}
+
+export function planIntervalLabel(interval: PlanBillingInterval) {
+  return interval === "year" ? "Yearly" : "Monthly";
+}
+
+export function planChoiceLabel(plan: {
+  name: string;
+  billingInterval?: string | null;
+  durationDays?: number | null;
+}) {
+  return `${plan.name} · ${planIntervalLabel(planBillingInterval(plan))}`;
+}
+
+export function planPriceForCurrency(
+  plan: { amount: number; amountUsd?: number | null },
+  currency: PlanDisplayCurrency,
+) {
+  return currency === "USD" ? plan.amountUsd ?? 0 : plan.amount;
+}
+
+/** India (IST or an Indian locale) sees INR. Everyone else sees USD. */
+export function detectPlanCurrency(): PlanDisplayCurrency {
+  try {
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (zone === "Asia/Kolkata" || zone === "Asia/Calcutta") return "INR";
+  } catch {
+    return "INR";
+  }
+  if (typeof navigator !== "undefined" && /-IN$/i.test(navigator.language || "")) return "INR";
+  return "USD";
 }
 
 export function planLabel(plan?: SubscriptionPlan | string | null, plans?: PlatformPlan[]) {

@@ -112,10 +112,6 @@ function buildTaskDescription(
     formData.reminderDate.trim()
       ? `Reminder: ${formatWorkZoneDateTime(formData.reminderDate)}`
       : "",
-    ...formData.checklistItems
-      .map((item) => item.trim())
-      .filter(Boolean)
-      .map((item) => `☐ ${item}`),
     ...customFieldLines,
   ]
     .filter(Boolean)
@@ -240,8 +236,14 @@ export async function submitCreateTask({
   ];
 
   if (createSubtaskMutation) {
-    for (const subtaskTitle of formData.subtaskTitles.map((t) => t.trim()).filter(Boolean)) {
-      sideEffects.push(createSubtaskMutation.mutateAsync({ taskId: task.id, title: subtaskTitle }));
+    const checklistTitles = [
+      ...formData.checklistItems,
+      ...formData.subtaskTitles,
+    ]
+      .map((title) => title.trim())
+      .filter(Boolean);
+    for (const title of checklistTitles) {
+      sideEffects.push(createSubtaskMutation.mutateAsync({ taskId: task.id, title }));
     }
   }
 

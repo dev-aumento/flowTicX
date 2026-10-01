@@ -25,6 +25,8 @@ import {
   formatInr,
   formatPlanDate,
   formatPlanDuration,
+  formatUsd,
+  planChoiceLabel,
   planLabel,
 } from "@/lib/platform-admin";
 import { planChecklist, teamMemberLabel } from "@/lib/plan-entitlements";
@@ -198,7 +200,7 @@ export default function PlatformClientDetail() {
     (catalog ?? []).find((item) => item.slug === selectedPlanSlug) ?? data?.assignedPlan ?? null;
 
   const planOptions = useMemo(() => {
-    const items = (catalog ?? []).map((item) => ({ value: item.slug, label: item.name }));
+    const items = (catalog ?? []).map((item) => ({ value: item.slug, label: planChoiceLabel(item) }));
     const current = data?.plan;
     if (current && !items.some((item) => item.value === current)) {
       items.unshift({
@@ -391,6 +393,7 @@ export default function PlatformClientDetail() {
               <Label>Catalog price</Label>
               <p className="flex h-11 items-center rounded-xl border border-dashed border-[#E6E8EC] px-3 text-sm text-[#6B7280] dark:border-[#334155]">
                 {formatInr(selectedPlan?.amount ?? 0)}
+                {selectedPlan ? ` · ${formatUsd(selectedPlan.amountUsd ?? 0)}` : ""}
               </p>
             </div>
             <div className="space-y-1.5">

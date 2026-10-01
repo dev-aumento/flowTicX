@@ -6,6 +6,7 @@ import { RoleBadge } from "@/components/shared/StatusBadge";
 import { AvatarPickerModal } from "@/components/settings/AvatarPickerModal";
 import { PersonalInformationPanel } from "@/components/settings/PersonalInformationPanel";
 import { OrganizationProfilePanel } from "@/components/settings/OrganizationProfilePanel";
+import { PlanSettingsPanel } from "@/components/settings/PlanSettingsPanel";
 import { writeProfilePrefs } from "@/lib/profile-prefs";
 import {
   DEFAULT_NOTIFICATION_PREFS,
@@ -31,6 +32,7 @@ import {
   IdCard,
   Landmark,
   Tags,
+  CreditCard,
 } from "lucide-react";
 import { TaskStatusLabelsPanel } from "@/components/settings/TaskStatusLabelsPanel";
 
@@ -41,6 +43,7 @@ const TABS = [
   { key: "task-status", label: "Task statuses", icon: Tags },
   { key: "notifications", label: "Notifications", icon: BellRing },
   { key: "organization", label: "Organization Profile", icon: Landmark, adminOnly: true },
+  { key: "plans", label: "Plans", icon: CreditCard, adminOnly: true },
 ] as const;
 
 const FINANCE_HIDDEN_TABS = new Set(["personal", "workspace", "notifications"]);
@@ -173,7 +176,7 @@ export default function Settings() {
   }, [workspaceCurrency?.currency, savedWorkspace.currency]);
 
   useEffect(() => {
-    if (user?.role !== "admin" && activeTab === "organization") {
+    if (user?.role !== "admin" && (activeTab === "organization" || activeTab === "plans")) {
       setActiveTab("profile");
       return;
     }
@@ -580,6 +583,8 @@ export default function Settings() {
               onError={setSaveError}
             />
           ) : null}
+
+          {activeTab === "plans" && user?.role === "admin" ? <PlanSettingsPanel /> : null}
 
           {activeTab === "task-status" ? (
             <TaskStatusLabelsPanel

@@ -19,8 +19,10 @@ const planInputSchema = z.object({
   id: z.number().int().positive().optional(),
   name: z.string().min(1).max(80),
   amount: z.number().min(0).max(10_000_000),
+  amountUsd: z.number().min(0).max(10_000_000),
+  billingInterval: z.enum(["month", "year"]),
   description: z.string().max(400),
-  durationDays: z.number().int().min(1).max(3650),
+  durationDays: z.number().int().min(1).max(3650).optional(),
   limits: z.object({
     projects: limitField,
     teamMembers: limitField,

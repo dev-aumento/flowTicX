@@ -1964,6 +1964,27 @@ export function mockCreateSubtask(taskId: number, title: string, actor: SafeUser
   return subtask;
 }
 
+export function mockToggleSubtask(id: number) {
+  for (const list of Object.values(taskSubtasks)) {
+    const item = list.find((entry) => entry.id === id);
+    if (!item) continue;
+    item.completed = !item.completed;
+    return item;
+  }
+  throw new Error("Checklist item not found");
+}
+
+export function mockDeleteSubtask(id: number) {
+  for (const [taskId, list] of Object.entries(taskSubtasks)) {
+    const index = list.findIndex((entry) => entry.id === id);
+    if (index < 0) continue;
+    list.splice(index, 1);
+    taskSubtasks[Number(taskId)] = list;
+    return { success: true as const };
+  }
+  throw new Error("Checklist item not found");
+}
+
 export function mockCreateTask(
   input: {
     title: string;
