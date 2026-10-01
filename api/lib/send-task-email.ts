@@ -1,5 +1,5 @@
 import { Collections } from "@db/mongo/collections";
-import type { NotificationDoc, ProjectDoc, SafeUser, TaskDoc, TaskPriority, UserDoc } from "@db/mongo/types";
+import type { NotificationDoc, ProjectDoc, SafeUser, TaskDoc, UserDoc } from "@db/mongo/types";
 import { formatDueLabel } from "@/lib/task-deadline";
 import { formatWorkZoneDateTime } from "@/lib/timezone";
 import { getAvatarColor, getInitials } from "@/lib/utils";
@@ -17,23 +17,8 @@ export type TaskEmailKind =
   | "participant"
   | "updated";
 
-const ACTIVITY_COLORS: Record<TaskEmailKind, string> = {
-  assign: "#2563EB",
-  comment: "#059669",
-  mention: "#7C3AED",
-  status: "#D97706",
-  overdue: "#DC2626",
-  completed: "#0F766E",
-  participant: "#4F46E5",
-  updated: "#0369A1",
-};
-
-const PRIORITY_COLORS: Record<TaskPriority, string> = {
-  low: "#6B7280",
-  medium: "#2563EB",
-  high: "#EA580C",
-  urgent: "#DC2626",
-};
+const TEXT = "#111827";
+const BUTTON = "#2563EB";
 
 export function taskEmailKind(
   type: NotificationDoc["type"],
@@ -191,11 +176,11 @@ function avatarHtml(name: string, avatar: string | null, origin: string, size: n
   };
 }
 
-function detailRow(label: string, value: string, valueColor = "#111827") {
+function detailRow(label: string, value: string) {
   if (!value) return "";
   return `<tr>
-    <td style="padding:4px 16px 4px 0;font-family:Arial,sans-serif;font-size:13px;line-height:20px;color:#6b7280;white-space:nowrap;vertical-align:top;">${escapeHtml(label)}</td>
-    <td style="padding:4px 0;font-family:Arial,sans-serif;font-size:13px;line-height:20px;font-weight:700;color:${valueColor};vertical-align:top;">${escapeHtml(value)}</td>
+    <td style="padding:4px 16px 4px 0;font-family:Arial,sans-serif;font-size:13px;line-height:20px;color:${TEXT};white-space:nowrap;vertical-align:top;">${escapeHtml(label)}</td>
+    <td style="padding:4px 0;font-family:Arial,sans-serif;font-size:13px;line-height:20px;font-weight:700;color:${TEXT};vertical-align:top;">${escapeHtml(value)}</td>
   </tr>`;
 }
 
@@ -206,8 +191,6 @@ function buildEmail(input: {
   taskTitle: string;
   projectName: string;
   priority: string;
-  priorityColor: string;
-  accent: string;
   due: string;
   description: string;
   comment: string;
@@ -217,16 +200,16 @@ function buildEmail(input: {
   logoUrl: string;
 }) {
   const button = input.link
-    ? `<a href="${escapeHtml(input.link)}" style="display:inline-block;background:${input.accent};color:#ffffff;font-family:Arial,sans-serif;font-size:14px;font-weight:700;line-height:20px;text-decoration:none;padding:10px 16px;border-radius:6px;">View in AASO</a>`
+    ? `<a href="${escapeHtml(input.link)}" style="display:inline-block;background:${BUTTON};color:#ffffff;font-family:Arial,sans-serif;font-size:14px;font-weight:700;line-height:20px;text-decoration:none;padding:10px 16px;border-radius:6px;">View in AASO</a>`
     : "";
   const footerLink = input.link
-    ? `<tr><td style="padding:14px 20px 16px;border-top:1px solid #e5e7eb;font-family:Arial,sans-serif;font-size:14px;"><a href="${escapeHtml(input.link)}" style="color:${input.accent};text-decoration:none;">View in AASO</a></td></tr>`
+    ? `<tr><td style="padding:14px 20px 16px;border-top:1px solid #e5e7eb;font-family:Arial,sans-serif;font-size:14px;"><a href="${escapeHtml(input.link)}" style="color:${TEXT};text-decoration:none;">View in AASO</a></td></tr>`
     : "";
   const comment = input.comment
-    ? `<p style="margin:14px 0 0;font-family:Arial,sans-serif;font-size:14px;line-height:22px;color:${input.accent};">${escapeHtml(input.comment)}</p>`
+    ? `<p style="margin:14px 0 0;font-family:Arial,sans-serif;font-size:14px;line-height:22px;color:${TEXT};">${escapeHtml(input.comment)}</p>`
     : "";
   const note = input.note
-    ? `<p style="margin:14px 0 0;font-family:Arial,sans-serif;font-size:14px;line-height:22px;color:#111827;">${escapeHtml(input.note)}</p>`
+    ? `<p style="margin:14px 0 0;font-family:Arial,sans-serif;font-size:14px;line-height:22px;color:${TEXT};">${escapeHtml(input.note)}</p>`
     : "";
   const logo = input.logoUrl
     ? `<img src="${escapeHtml(input.logoUrl)}" width="28" height="28" alt="" style="display:inline-block;vertical-align:middle;border:0;" />`
@@ -243,7 +226,7 @@ function buildEmail(input: {
             <td style="padding:0 4px 18px;">
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
                 <tr>
-                  <td valign="middle" style="font-family:Georgia,Times New Roman,serif;font-size:28px;line-height:32px;font-weight:700;color:#111827;">
+                  <td valign="middle" style="font-family:Georgia,Times New Roman,serif;font-size:28px;line-height:32px;font-weight:700;color:${TEXT};">
                     ${logo}<span style="display:inline-block;vertical-align:middle;padding-left:8px;">aaso</span>
                   </td>
                   <td align="right" valign="middle">${input.avatar.html}</td>
@@ -252,38 +235,38 @@ function buildEmail(input: {
             </td>
           </tr>
           <tr>
-            <td style="padding:0 4px 4px;font-family:Arial,sans-serif;font-size:16px;line-height:24px;color:#111827;">Your unread notifications</td>
+            <td style="padding:0 4px 4px;font-family:Arial,sans-serif;font-size:16px;line-height:24px;color:${TEXT};">Your unread notifications</td>
           </tr>
           <tr>
-            <td style="padding:0 4px 2px;font-family:Arial,sans-serif;font-size:22px;line-height:28px;font-weight:700;color:${input.accent};">${escapeHtml(input.headline)}</td>
+            <td style="padding:0 4px 2px;font-family:Arial,sans-serif;font-size:22px;line-height:28px;font-weight:700;color:${TEXT};">${escapeHtml(input.headline)}</td>
           </tr>
           <tr>
-            <td style="padding:0 4px 16px;font-family:Arial,sans-serif;font-size:14px;line-height:20px;color:#6b7280;">${escapeHtml(input.projectName || "AASO")}</td>
+            <td style="padding:0 4px 16px;font-family:Arial,sans-serif;font-size:14px;line-height:20px;color:${TEXT};">${escapeHtml(input.projectName || "AASO")}</td>
           </tr>
           ${button ? `<tr><td style="padding:0 4px 22px;">${button}</td></tr>` : ""}
           <tr>
             <td>
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #e5e7eb;border-left:4px solid ${input.accent};border-radius:12px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;">
                 <tr>
                   <td style="padding:18px 20px 8px;">
                     <table role="presentation" cellpadding="0" cellspacing="0">
                       <tr>
                         <td valign="top" style="padding-right:12px;">${input.avatar.html}</td>
-                        <td valign="middle" style="font-family:Arial,sans-serif;font-size:16px;line-height:22px;font-weight:700;color:${input.accent};">${escapeHtml(input.headline)}</td>
+                        <td valign="middle" style="font-family:Arial,sans-serif;font-size:16px;line-height:22px;font-weight:700;color:${TEXT};">${escapeHtml(input.headline)}</td>
                       </tr>
                     </table>
                   </td>
                 </tr>
                 <tr>
-                  <td style="padding:6px 20px 4px;font-family:Arial,sans-serif;font-size:15px;line-height:22px;font-weight:700;color:#111827;">${escapeHtml(input.taskTitle)}</td>
+                  <td style="padding:6px 20px 4px;font-family:Arial,sans-serif;font-size:15px;line-height:22px;font-weight:700;color:${TEXT};">${escapeHtml(input.taskTitle)}</td>
                 </tr>
                 <tr>
-                  <td style="padding:2px 20px 8px;font-family:Arial,sans-serif;font-size:13px;line-height:18px;color:#6b7280;">${escapeHtml(input.actorName)} · ${escapeHtml(input.when)}</td>
+                  <td style="padding:2px 20px 8px;font-family:Arial,sans-serif;font-size:13px;line-height:18px;color:${TEXT};">${escapeHtml(input.actorName)} · ${escapeHtml(input.when)}</td>
                 </tr>
                 <tr>
                   <td style="padding:4px 20px 8px;">
                     <table role="presentation" cellpadding="0" cellspacing="0">
-                      ${detailRow("Priority", input.priority, input.priorityColor)}
+                      ${detailRow("Priority", input.priority)}
                       ${detailRow("Due", input.due)}
                       ${detailRow("Project", input.projectName)}
                       ${input.description ? detailRow("Description", input.description) : ""}
@@ -378,8 +361,6 @@ export async function sendTaskNotificationEmails(input: {
     taskTitle,
     projectName,
     priority: priorityKey ? labelize(priorityKey) : "",
-    priorityColor: priorityKey ? PRIORITY_COLORS[priorityKey] : "#111827",
-    accent: ACTIVITY_COLORS[input.kind],
     due,
     description,
     comment,
