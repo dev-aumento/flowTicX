@@ -984,6 +984,14 @@ export const authRouter = createRouter({
       } catch (error) {
         if (error instanceof TRPCError) throw error;
         console.error("[auth] Workspace lookup failed:", error);
+        const message = error instanceof Error ? error.message : String(error);
+        if (/requires authentication|Authentication failed|Unauthorized/i.test(message)) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message:
+              "The database requires a username and password. Add them to MONGODB_URI in .env, then restart the app.",
+          });
+        }
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
           message: "Unable to look up workspaces right now. Please try again.",
@@ -1300,6 +1308,13 @@ export const authRouter = createRouter({
         if (error instanceof TRPCError) throw error;
         console.error("[auth] Login failed:", error);
         const message = error instanceof Error ? error.message : String(error);
+        if (/requires authentication|Authentication failed|code:\s*13\b|Unauthorized/i.test(message)) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message:
+              "The database requires a username and password. Add them to MONGODB_URI in .env, then restart the app.",
+          });
+        }
         if (
           /electionId\/setVersion mismatch|primary marked stale|MongoServerSelectionError|not primary/i.test(
             message,

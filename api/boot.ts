@@ -9,6 +9,7 @@ import { env } from "./lib/env";
 import { ensureSchema } from "./lib/migrate";
 import { hasMongoConfigured } from "./queries/mongo";
 import { notificationStreamHandler } from "./notification-stream";
+import { mountMarketingSession } from "./marketing-routes";
 import { startAutoClockOutScheduler } from "./lib/auto-clock-out";
 import { startHolidayReminderScheduler } from "./lib/holiday-reminders";
 import { startDeadlineReminderScheduler } from "./lib/deadline-reminders";
@@ -17,6 +18,7 @@ const app = new Hono<{ Bindings: HttpBindings }>();
 
 app.use(bodyLimit({ maxSize: 1024 * 1024 * 1024 }));
 app.get("/api/health", (c) => c.json({ ok: true }));
+mountMarketingSession(app);
 app.get("/api/notifications/stream", notificationStreamHandler);
 app.use("/api/trpc/*", async (c) => {
   return fetchRequestHandler({

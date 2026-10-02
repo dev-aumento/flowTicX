@@ -8,19 +8,27 @@ import { defineConfig } from "vite"
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, path.resolve(__dirname), "");
-  process.env.MONGODB_USER ??= env.MONGODB_USER;
-  process.env.MONGODB_PASSWORD ??= env.MONGODB_PASSWORD;
-  process.env.MONGODB_DB_NAME ??= env.MONGODB_DB_NAME;
-  process.env.MONGODB_CLUSTER_HOST ??= env.MONGODB_CLUSTER_HOST;
-  process.env.MONGODB_STANDARD_HOSTS ??= env.MONGODB_STANDARD_HOSTS;
-  process.env.MONGODB_URI ??= env.MONGODB_URI;
-  process.env.AUTH_DISABLED ??= env.AUTH_DISABLED;
-  process.env.APP_SECRET ??= env.APP_SECRET;
-  process.env.USE_DATABASE ??= env.USE_DATABASE;
+  // .env wins over a stale shell value so a new database string is actually used.
+  for (const key of [
+    "MONGODB_USER",
+    "MONGODB_PASSWORD",
+    "MONGODB_DB_NAME",
+    "MONGODB_CLUSTER_HOST",
+    "MONGODB_STANDARD_HOSTS",
+    "MONGODB_URI",
+    "MONGO_URI",
+    "DATABASE_URL",
+    "AUTH_DISABLED",
+    "APP_SECRET",
+    "USE_DATABASE",
+  ]) {
+    const value = env[key];
+    if (value) process.env[key] = value;
+  }
 
   return {
   plugins: [
-    devServer({ entry: "api/boot.ts", exclude: [/^\/(?!api\/).*$/] }),
+    devServer({ entry: "api/boot.ts", exclude: [/^\/(?!api\/|logout(?:$|[?#])).*$/] }),
     react()],
   server: {
     port: 3000,

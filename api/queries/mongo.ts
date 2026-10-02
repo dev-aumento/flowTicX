@@ -39,14 +39,16 @@ async function createMongoDb(): Promise<Db> {
     );
   }
 
-  const nextClient = new MongoClient(env.mongoUri, {
+  const uri = env.mongoUri;
+  const singleHost = uri.startsWith("mongodb://") && !uri.includes(",");
+  const nextClient = new MongoClient(uri, {
     serverSelectionTimeoutMS: 15000,
     connectTimeoutMS: 15000,
     minPoolSize: 2,
     maxPoolSize: 20,
     family: 4,
-    // Re-discover replica set members after Atlas storage / election changes.
-    directConnection: false,
+    // A tunneled standalone host must not try to discover other replica members.
+    directConnection: singleHost,
   });
 
   try {

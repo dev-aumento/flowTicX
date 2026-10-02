@@ -4,6 +4,7 @@ import { Errors } from "@contracts/errors";
 import type { SafeUser } from "../queries/users";
 import { findUserById, omitPasswordHash } from "../queries/users";
 import { getSessionCookieOptions } from "./cookies";
+import { clearHintCookie, requestPublicOrigin, serializeHintCookie } from "./marketing-session";
 import { signSessionToken, verifySessionToken } from "./session";
 import { hasMongoConfigured } from "../queries/mongo";
 import * as mock from "./mock-store";
@@ -85,6 +86,23 @@ export async function createSessionForUser(
   invalidateAuthUserCache(userId);
   const token = await signSessionToken({ userId });
   appendSessionCookie(resHeaders, reqHeaders, token);
+  try {
+    const user = hasMongoConfigured()
+      ? await findUserById(userId)
+      : mock.mockFindUserById(userId);
+    if (user) {
+      resHeaders.append(
+        "set-cookie",
+        serializeHintCookie(
+          reqHeaders,
+          { name: user.name ?? null, avatar: user.avatar ?? null },
+          requestPublicOrigin(reqHeaders),
+        ),
+      );
+    }
+  } catch (error) {
+    console.error("[auth] Could not set the marketing hint cookie:", error);
+  }
   return token;
 }
 
@@ -122,4 +140,5 @@ export function clearSessionCookie(reqHeaders: Headers, resHeaders: Headers) {
       expires: new Date(0),
     }),
   );
+  resHeaders.append("set-cookie", clearHintCookie(reqHeaders));
 }

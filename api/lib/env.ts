@@ -58,8 +58,21 @@ function buildSrvMongoUri(): string {
   return "";
 }
 
+function explicitMongoUri(): string {
+  for (const key of ["MONGODB_URI", "MONGO_URI", "DATABASE_URL"]) {
+    const value = process.env[key]?.trim() ?? "";
+    if (value && !value.includes("YOUR_CLUSTER") && isMongoConnectionString(value)) {
+      return value;
+    }
+  }
+  return "";
+}
+
 function buildMongoUri(): string {
-  // Prefer standard URI (avoids querySrv ECONNREFUSED on some Windows networks)
+  // The connection string in .env is the database the app should use.
+  const explicit = explicitMongoUri();
+  if (explicit) return explicit;
+
   const standard = buildStandardMongoUri();
   if (standard) return standard;
 
