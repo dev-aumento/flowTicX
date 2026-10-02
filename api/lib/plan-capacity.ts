@@ -20,18 +20,8 @@ export async function notifyIfProjectLimitReached(organizationId: number, actorI
 export async function notifyIfMemberLimitReached(organizationId: number, actorId: number | null) {
   const limits = await limitsForOrganization(organizationId);
   if (!limits || limits.teamMembers == null) return;
-  const users = await getCollection(Collections.users);
-  const active = await users.countDocuments({
-    organizationId,
-    role: { $ne: "platform" },
-    status: { $nin: ["inactive", "suspended"] },
-  });
-  const invites = await getCollection(Collections.employeeInvites);
-  const pending = await invites.countDocuments({
-    organizationId,
-    status: "pending",
-    expiresAt: { $gt: new Date() },
-  });
+  const active = await activeMemberCount(organizationId);
+  const pending = await pendingEmployeeInviteCount(organizationId);
   if (active + pending >= limits.teamMembers) {
     await notifyPlanLimitReached(organizationId, actorId);
   }
@@ -63,12 +53,26 @@ export async function assertCanAddProject(organizationId: number, actorId?: numb
   }
 }
 
+function staffSeatFilter(organizationId: number) {
+  return {
+    organizationId,
+    role: { $nin: ["platform", "client"] },
+    status: { $nin: ["inactive", "suspended"] },
+  };
+}
+
 async function activeMemberCount(organizationId: number) {
   const users = await getCollection(Collections.users);
-  return users.countDocuments({
+  return users.countDocuments(staffSeatFilter(organizationId));
+}
+
+async function pendingEmployeeInviteCount(organizationId: number) {
+  const invites = await getCollection(Collections.employeeInvites);
+  return invites.countDocuments({
     organizationId,
-    role: { $ne: "platform" },
-    status: { $nin: ["inactive", "suspended"] },
+    status: "pending",
+    expiresAt: { $gt: new Date() },
+    inviteKind: { $ne: "client" },
   });
 }
 
@@ -77,12 +81,7 @@ export async function assertCanInviteMember(organizationId: number, actorId?: nu
   if (!limits || limits.teamMembers == null) return;
 
   const active = await activeMemberCount(organizationId);
-  const invites = await getCollection(Collections.employeeInvites);
-  const pending = await invites.countDocuments({
-    organizationId,
-    status: "pending",
-    expiresAt: { $gt: new Date() },
-  });
+  const pending = await pendingEmployeeInviteCount(organizationId);
   if (active + pending >= limits.teamMembers) {
     await notifyPlanLimitReached(organizationId, actorId ?? null);
     throw new TRPCError({

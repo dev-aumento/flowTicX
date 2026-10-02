@@ -3,7 +3,7 @@ import { Collections } from "@db/mongo/collections";
 import { updateById } from "../queries/connection";
 import { omitPasswordHash } from "../queries/users";
 import { findOrganizationById, resolveClientWorkspace } from "./tenant";
-import { resolveOrgPlanAccess, type OrgPlanAccess } from "./subscription-access";
+import { resolveOrgPlanAccess, settleIntroEnterprise, type OrgPlanAccess } from "./subscription-access";
 
 /** Task/project access invited teammates need in a client portal. Owners keep invoices/team. */
 export const CLIENT_WORKSPACE_MEMBER_PERMISSIONS = [
@@ -55,10 +55,11 @@ export async function toSessionUser(
   const resolved =
     clientWorkspace ??
     (role === "client" ? true : orgIsClientWorkspace);
-  const org =
+  const loaded =
     base.organizationId != null && base.organizationId > 0
       ? await findOrganizationById(base.organizationId).catch(() => null)
       : null;
+  const org = loaded ? await settleIntroEnterprise(loaded).catch(() => loaded) : null;
   const planAccess = await resolveOrgPlanAccess(org);
   return {
     ...base,

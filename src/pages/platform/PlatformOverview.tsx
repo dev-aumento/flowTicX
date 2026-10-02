@@ -135,7 +135,7 @@ export default function PlatformOverview() {
                     </div>
                     <div className="flex shrink-0 items-center justify-between gap-3 sm:flex-col sm:items-end sm:justify-center">
                       <p className="whitespace-nowrap text-sm font-semibold text-[#111827] dark:text-white">
-                        {formatInr(row.subscriptionAmount)}
+                        {row.introEnterprise ? "Complimentary" : formatInr(row.subscriptionAmount)}
                       </p>
                       <StatusBadge status={row.planStatus} />
                     </div>

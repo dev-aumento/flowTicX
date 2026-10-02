@@ -8,6 +8,7 @@ import { findPlatformPlan, listPlatformPlans, upsertPlatformPlan, deletePlatform
 import { deleteCustomerOrganization } from "./lib/delete-customer-org";
 import { invalidateAuthUserCache } from "./lib/auth";
 import { queuePlanNotification } from "./lib/notify-plan";
+import { ensureSampleProjects } from "./lib/sample-workspace";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 
@@ -51,6 +52,7 @@ type CustomerRow = {
   planCancelledAt: Date | null;
   planCancelReason: string | null;
   planNotes: string | null;
+  introEnterprise: boolean;
   memberCount: number;
   createdAt: Date;
 };
@@ -65,8 +67,9 @@ function normalizeOrg(
   const catalog = plansBySlug.get(plan);
   const planStatus: SubscriptionStatus =
     org.planStatus ?? (plan === "trial" ? "trial" : "unpaid");
-  const subscriptionAmount =
-    typeof org.subscriptionAmount === "number"
+  const subscriptionAmount = org.introEnterprise
+    ? 0
+    : typeof org.subscriptionAmount === "number"
       ? org.subscriptionAmount
       : catalog?.amount ?? 0;
   const purchasedAt = org.purchasedAt ?? org.createdAt ?? null;
@@ -86,6 +89,7 @@ function normalizeOrg(
     planCancelledAt: org.planCancelledAt ?? null,
     planCancelReason: org.planCancelReason ?? null,
     planNotes: org.planNotes ?? null,
+    introEnterprise: Boolean(org.introEnterprise),
     createdAt: org.createdAt,
   };
 }
@@ -481,11 +485,21 @@ export const platformRouter = createRouter({
         planStartsAt,
         planExpiresAt,
         planNotes: input.planNotes === undefined ? org.planNotes ?? null : input.planNotes,
+        introEnterprise:
+          input.planStatus === "paid" || input.planStatus === "unpaid" ? false : org.introEnterprise ?? false,
         ...cancelled,
         updatedAt: new Date(),
       });
       if (!updated) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Customer not found" });
+      }
+
+      if (input.planStatus !== "cancelled") {
+        try {
+          await ensureSampleProjects(updated.id, updated.plan ?? "trial");
+        } catch (error) {
+          console.error("[platform] Sample projects were not updated:", error);
+        }
       }
 
       const planChanged = (org.plan ?? "trial") !== input.plan;

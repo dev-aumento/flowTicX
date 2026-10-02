@@ -39,7 +39,7 @@ export const PLAN_HIGHLIGHTS: PlanHighlight[] = [
   { key: "ai_summaries", label: "AI summaries & predictive workload", group: "feature" },
   { key: "integrations", label: "Deep integrations (Slack, Google, Zoom)", group: "feature", featureKeys: ["meetings"] },
   { key: "includes_growth", label: "Everything in Growth", group: "feature", includes: ["growth"] },
-  { key: "hr_advanced", label: "Advanced HR & People Operations", group: "feature", featureKeys: ["employees"] },
+  { key: "hr_advanced", label: "Advanced HR & People Operations", group: "feature", featureKeys: ["hr"] },
   { key: "custom_roles", label: "Custom roles, permissions & access", group: "feature", featureKeys: ["permissions"] },
   { key: "multi_workspace", label: "Multi-workspace & subsidiary setup", group: "feature" },
   { key: "api_webhooks", label: "REST API & Webhook connectors", group: "feature" },
@@ -212,6 +212,8 @@ export function deriveFeatureKeys(
 
   add(highlightKeys);
   if (limits.projects !== 0) features.add("projects");
+  // Team directory is on every plan. Seat count is limits.teamMembers.
+  if (limits.teamMembers !== 0) features.add("employees");
   return [...features];
 }
 

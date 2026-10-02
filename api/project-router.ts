@@ -27,6 +27,7 @@ import type { ProjectDoc, ProjectMemberDoc, TaskDoc, UserDoc } from "@db/mongo/t
 import { ensureSchema } from "./lib/migrate";
 import { belongsToUserOrg, orgFilter, requireOrganizationId, resolveClientWorkspace } from "./lib/tenant";
 import { assertCanAddProject, notifyIfProjectLimitReached } from "./lib/plan-capacity";
+import { seedSampleWorkspaceOnce } from "./lib/sample-workspace";
 import { assertPlanFeature } from "./lib/plan-guard";
 import {
   attachClientToMatchedProject,
@@ -141,6 +142,11 @@ export const projectRouter = createRouter({
       }
 
       await ensureSchema();
+      try {
+        await seedSampleWorkspaceOnce(requireOrganizationId(ctx.user));
+      } catch (error) {
+        console.error("[projects] Sample projects were not created:", error);
+      }
       const { status, search, joinedOnly } = input || {};
 
       const filter: Record<string, unknown> = { ...orgFilter(ctx.user) };
@@ -278,6 +284,11 @@ export const projectRouter = createRouter({
     }
 
     await ensureSchema();
+    try {
+      await seedSampleWorkspaceOnce(requireOrganizationId(ctx.user));
+    } catch (error) {
+      console.error("[projects] Sample projects were not created:", error);
+    }
     const projectCol = await getCollection<ProjectDoc>(Collections.projects);
     const projects = await projectCol
       .find(orgFilter(ctx.user))

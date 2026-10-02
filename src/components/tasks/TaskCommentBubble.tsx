@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { Copy, Loader2, MoreHorizontal, Pencil, Smile, Trash2, X } from "lucide-react";
 import { UserAvatar } from "@/components/shared/UserAvatar";
@@ -11,7 +11,11 @@ import { createAttachmentPreviewResolver } from "@/lib/attachment-preview";
 import { CommentRichContent } from "@/components/tasks/CommentRichContent";
 import {
   RichTextCommentEditor,
+  deleteTextRange,
+  getCaretOffset,
+  getPlainText,
   isSelectionInsideList,
+  type RichTextCommentEditorHandle,
 } from "@/components/tasks/RichTextCommentEditor";
 import {
   buildRichCommentMessage,
@@ -20,7 +24,11 @@ import {
   isEditorContentEmpty,
   type CommentMediaRef,
 } from "@/lib/rich-comment";
-import type { MentionUser } from "@/lib/task-comment-mentions";
+import {
+  filterMentionUsers,
+  getMentionQuery,
+  type MentionUser,
+} from "@/lib/task-comment-mentions";
 import {
   commentReactionSummary,
   readCommentReactions,
@@ -91,6 +99,13 @@ export function TaskCommentBubble({
   const [editHtml, setEditHtml] = useState("");
   const [editMedia, setEditMedia] = useState<CommentMediaRef[]>([]);
   const [editorKey, setEditorKey] = useState(0);
+  const [plainText, setPlainText] = useState("");
+  const [caretPosition, setCaretPosition] = useState(0);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const [mentionMenuPos, setMentionMenuPos] = useState<{ top: number; left: number; width: number } | null>(null);
+  const editorHostRef = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<RichTextCommentEditorHandle>(null);
+  const mentionRangeRef = useRef<ReturnType<typeof getMentionQuery>>(null);
   const wasSavingRef = useRef(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
@@ -191,6 +206,81 @@ export function TaskCommentBubble({
     setMentionChips([]);
     setEditHtml("");
     setEditMedia([]);
+    setPlainText("");
+    setCaretPosition(0);
+    mentionRangeRef.current = null;
+  };
+
+  const editorElement = () =>
+    editorHostRef.current?.querySelector<HTMLDivElement>("[contenteditable]") ?? null;
+
+  const mentionState = useMemo(
+    () => (isEditing ? getMentionQuery(plainText, caretPosition) : null),
+    [isEditing, plainText, caretPosition],
+  );
+
+  useEffect(() => {
+    mentionRangeRef.current = mentionState;
+  }, [mentionState]);
+
+  const mentionSuggestions = useMemo(() => {
+    if (!mentionState) return [];
+    return filterMentionUsers(
+      mentionUsers.filter((user) => !mentionChips.some((chip) => chip.id === user.id)),
+      mentionState.query,
+    );
+  }, [mentionState, mentionUsers, mentionChips]);
+
+  useEffect(() => {
+    setMentionIndex(0);
+  }, [mentionState?.query, mentionSuggestions.length]);
+
+  useLayoutEffect(() => {
+    if (!isEditing || mentionSuggestions.length === 0) {
+      setMentionMenuPos(null);
+      return;
+    }
+
+    const update = () => {
+      const rect = editorHostRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setMentionMenuPos({ top: rect.top, left: rect.left, width: rect.width });
+    };
+
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [isEditing, mentionSuggestions.length, plainText, caretPosition]);
+
+  const syncCaret = () => {
+    const editor = editorElement();
+    if (!editor) return;
+    setPlainText(getPlainText(editor));
+    setCaretPosition(getCaretOffset(editor));
+  };
+
+  const insertMention = (mentioned: MentionUser, range = mentionRangeRef.current) => {
+    if (!range) return;
+
+    setMentionChips((current) => {
+      if (current.some((chip) => chip.id === mentioned.id)) return current;
+      return [...current, mentioned];
+    });
+
+    const editor = editorElement();
+    if (editor) {
+      deleteTextRange(editor, range.start, range.end);
+      setEditHtml(editor.innerHTML);
+      setPlainText(getPlainText(editor));
+      setCaretPosition(getCaretOffset(editor));
+    }
+
+    mentionRangeRef.current = null;
+    editor?.focus();
   };
 
   const saveEdit = () => {
@@ -403,7 +493,30 @@ export function TaskCommentBubble({
         {isEditing ? (
           <div
             className="space-y-2"
-            onKeyDown={(event) => {
+            onKeyDown={(event: KeyboardEvent) => {
+              if (mentionSuggestions.length > 0 && mentionRangeRef.current) {
+                if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  setMentionIndex((prev) => (prev + 1) % mentionSuggestions.length);
+                  return;
+                }
+                if (event.key === "ArrowUp") {
+                  event.preventDefault();
+                  setMentionIndex((prev) => (prev - 1 + mentionSuggestions.length) % mentionSuggestions.length);
+                  return;
+                }
+                if (event.key === "Enter" || event.key === "Tab") {
+                  event.preventDefault();
+                  insertMention(mentionSuggestions[mentionIndex]);
+                  return;
+                }
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  mentionRangeRef.current = null;
+                  return;
+                }
+              }
+
               if (event.key === "Enter" && !event.shiftKey && !isSelectionInsideList()) {
                 // Keep Enter for new lines/lists inside the editor while editing.
                 // Save remains via the Save button.
@@ -411,6 +524,37 @@ export function TaskCommentBubble({
               }
             }}
           >
+            {mentionMenuPos && mentionSuggestions.length > 0
+              ? createPortal(
+                  <div
+                    className="fixed z-[220] rounded-xl border border-gray-200 bg-white shadow-lg overflow-hidden"
+                    style={{
+                      top: mentionMenuPos.top - 8,
+                      left: mentionMenuPos.left,
+                      width: mentionMenuPos.width,
+                      transform: "translateY(-100%)",
+                    }}
+                  >
+                    {mentionSuggestions.map((mentioned, index) => (
+                      <button
+                        key={mentioned.id}
+                        type="button"
+                        onMouseDown={(event) => {
+                          event.preventDefault();
+                          insertMention(mentioned);
+                        }}
+                        className={`w-full flex items-center gap-3 px-3 py-2 text-left text-sm hover:bg-gray-50 ${
+                          index === mentionIndex ? "bg-blue-50" : ""
+                        }`}
+                      >
+                        <UserAvatar name={mentioned.name} avatar={mentioned.avatar} size={28} />
+                        <span className="font-medium text-gray-800">{mentioned.name}</span>
+                      </button>
+                    ))}
+                  </div>,
+                  document.body,
+                )
+              : null}
             <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
               {mentionChips.length > 0 ? (
                 <div className="flex flex-wrap gap-2 px-3 pt-3">
@@ -433,19 +577,27 @@ export function TaskCommentBubble({
                 </div>
               ) : null}
 
-              <RichTextCommentEditor
-                key={editorKey}
-                initialHtml={editHtml}
-                initialMedia={editMedia}
-                onChange={(html, media) => {
-                  setEditHtml(html);
-                  setEditMedia(media);
-                }}
-                onUploadMedia={onUploadMedia}
-                resolveMediaPreviewUrl={resolveMediaPreviewUrl}
-                disabled={isSaving}
-                placeholder="Edit comment..."
-              />
+              <div
+                ref={editorHostRef}
+                onKeyUp={syncCaret}
+                onClick={syncCaret}
+              >
+                <RichTextCommentEditor
+                  ref={editorRef}
+                  key={editorKey}
+                  initialHtml={editHtml}
+                  initialMedia={editMedia}
+                  onChange={(html, media) => {
+                    setEditHtml(html);
+                    setEditMedia(media);
+                    syncCaret();
+                  }}
+                  onUploadMedia={onUploadMedia}
+                  resolveMediaPreviewUrl={resolveMediaPreviewUrl}
+                  disabled={isSaving}
+                  placeholder="Edit comment... Type @ to mention someone"
+                />
+              </div>
             </div>
 
             <div className="flex items-center justify-end gap-2">

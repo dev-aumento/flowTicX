@@ -24,6 +24,7 @@ import {
 } from "./lib/client-workspace";
 import { assertActiveSubscription } from "./lib/subscription-access";
 import { findPlatformPlan } from "./lib/platform-plans";
+import { seedSampleWorkspaceOnce } from "./lib/sample-workspace";
 import { queuePlanNotification } from "./lib/notify-plan";
 import { ALL_PERMISSION_KEYS } from "@contracts/permissions";
 import { Collections } from "@db/mongo/collections";
@@ -471,7 +472,12 @@ export const authRouter = createRouter({
 
       const passwordHash = await hashPassword(input.password);
       const { firstName, lastName } = splitName(input.name);
-      const org = await createOrganization(input.organizationName, null);
+      const org = await createOrganization(input.organizationName, null, {
+        plan: "enterprise",
+        planStatus: "trial",
+        subscriptionAmount: 0,
+        introEnterprise: true,
+      });
 
       const user = await createUser({
         unionId: `admin_${nanoid()}`,
@@ -495,12 +501,18 @@ export const authRouter = createRouter({
         updatedAt: new Date(),
       });
 
+      try {
+        await seedSampleWorkspaceOnce(org.id);
+      } catch (error) {
+        console.error("[auth] Sample projects were not created:", error);
+      }
+
       const catalog = await findPlatformPlan(org.plan ?? "trial");
       queuePlanNotification({
         kind: "joined",
         organizationId: org.id,
         organizationName: org.name,
-        planName: catalog?.name ?? "Trial",
+        planName: org.introEnterprise ? "Enterprise (complimentary)" : catalog?.name ?? "Trial",
         actorId: user.id,
       });
 

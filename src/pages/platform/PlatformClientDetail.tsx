@@ -470,7 +470,9 @@ export default function PlatformClientDetail() {
               </div>
               <div className="flex justify-between gap-3">
                 <dt className="text-[#6B7280]">Amount</dt>
-                <dd className="font-semibold">{formatInr(data.subscriptionAmount)}</dd>
+                <dd className="font-semibold">
+                  {data.introEnterprise ? "Complimentary" : formatInr(data.subscriptionAmount)}
+                </dd>
               </div>
               <div className="flex justify-between gap-3">
                 <dt className="text-[#6B7280]">Starts</dt>

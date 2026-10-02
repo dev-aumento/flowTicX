@@ -1853,11 +1853,12 @@ export const taskRouter = createRouter({
       }
 
       const editedAt = new Date();
+      const previousMessage = activity.newValue ?? "";
       await activityCol.updateOne(
         { id: input.activityId },
         {
           $set: {
-            oldValue: activity.newValue,
+            oldValue: previousMessage,
             newValue: input.message,
             metadata: {
               ...(activity.metadata && typeof activity.metadata === "object" ? activity.metadata : {}),
@@ -1866,6 +1867,27 @@ export const taskRouter = createRouter({
           },
         },
       );
+
+      const previousMentionIds = new Set(extractMentionedUserIdsFromComment(previousMessage));
+      const newlyMentioned = extractMentionedUserIdsFromComment(input.message).filter(
+        (id) => !previousMentionIds.has(id),
+      );
+      if (newlyMentioned.length > 0) {
+        const task = await findById<TaskDoc>(Collections.tasks, input.taskId);
+        const previewSource = richCommentPlainText(input.message) || formatCommentPreview(input.message);
+        const preview = previewSource.length > 120 ? `${previewSource.slice(0, 120)}…` : previewSource;
+        await notifyTaskMembers({
+          taskId: input.taskId,
+          actor: ctx.user,
+          type: "mention",
+          title: "You were mentioned in a comment",
+          message: `${actorLabel(ctx.user)} mentioned you on "${task?.title ?? "a task"}": ${preview}`,
+          activityId: input.activityId,
+          extraRecipientIds: newlyMentioned,
+          includeAssignee: false,
+          includeOwner: false,
+        });
+      }
 
       return { success: true, editedAt };
     }),

@@ -7,9 +7,11 @@ import { hasMongoConfigured, updateById } from "./queries/connection";
 import { findOrganizationById, requireOrganizationId } from "./lib/tenant";
 import { findPlatformPlan, listPlatformPlans } from "./lib/platform-plans";
 import { addPlanDuration } from "@/lib/platform-admin";
-import { resolveOrgPlanAccess } from "./lib/subscription-access";
+import { resolveOrgPlanAccess, settleIntroEnterprise } from "./lib/subscription-access";
+import { isFreeTierPlan, planDaysRemaining, planExpiryWarning } from "./lib/plan-expiry";
 import { invalidateAuthUserCache } from "./lib/auth";
 import { queuePlanNotification } from "./lib/notify-plan";
+import { ensureSampleProjects } from "./lib/sample-workspace";
 
 export const subscriptionRouter = createRouter({
   plans: authedQuery.query(async () => listPlatformPlans()),
@@ -20,20 +22,29 @@ export const subscriptionRouter = createRouter({
     if (!org || org.workspaceType === "platform") {
       throw new TRPCError({ code: "NOT_FOUND", message: "Workspace not found" });
     }
-    const access = await resolveOrgPlanAccess(org);
+    const settled = await settleIntroEnterprise(org);
+    const access = await resolveOrgPlanAccess(settled);
     const catalog = access.plan ? await findPlatformPlan(access.plan) : null;
-    const planStartsAt = org.planStartsAt ?? org.purchasedAt ?? org.createdAt ?? null;
+    const planStartsAt = settled.planStartsAt ?? settled.purchasedAt ?? settled.createdAt ?? null;
     const planExpiresAt = planStartsAt
-      ? addPlanDuration(new Date(planStartsAt), org.plan ?? "trial", catalog?.durationDays)
-      : org.planExpiresAt ?? null;
+      ? addPlanDuration(new Date(planStartsAt), settled.plan ?? "trial", catalog?.durationDays)
+      : settled.planExpiresAt ?? null;
+    const daysRemaining =
+      planExpiresAt && !isFreeTierPlan(settled.plan)
+        ? planDaysRemaining(new Date(planExpiresAt))
+        : null;
+    const introEnterprise = Boolean(settled.introEnterprise);
     return {
       organizationId,
-      organizationName: org.name,
+      organizationName: settled.name,
       ...access,
-      subscriptionAmount: org.subscriptionAmount ?? catalog?.amount ?? 0,
+      introEnterprise,
+      subscriptionAmount: introEnterprise ? 0 : settled.subscriptionAmount ?? catalog?.amount ?? 0,
       planStartsAt,
       planExpiresAt,
       durationDays: catalog?.durationDays ?? null,
+      daysRemaining,
+      expiryWarning: planExpiryWarning(daysRemaining),
     };
   }),
 
@@ -73,6 +84,7 @@ export const subscriptionRouter = createRouter({
         planExpiresAt: expiresAt,
         planCancelledAt: null,
         planCancelReason: null,
+        introEnterprise: false,
         updatedAt: now,
       });
       if (!updated) {
@@ -93,6 +105,11 @@ export const subscriptionRouter = createRouter({
       }
 
       invalidateAuthUserCache();
+      try {
+        await ensureSampleProjects(updated.id, updated.plan ?? "trial");
+      } catch (error) {
+        console.error("[subscription] Sample projects were not updated:", error);
+      }
       const access = await resolveOrgPlanAccess(updated);
       return {
         organizationId,

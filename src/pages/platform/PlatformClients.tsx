@@ -290,7 +290,7 @@ export default function PlatformClients() {
                               {row.ownerName}
                             </p>
                             <p className="truncate text-xs text-[#6B7280]">
-                              {rowPlanLabel} · {formatInr(row.subscriptionAmount)}
+                              {rowPlanLabel} · {row.introEnterprise ? "Complimentary" : formatInr(row.subscriptionAmount)}
                             </p>
                           </div>
                           <StatusBadge status={row.planStatus} />
@@ -370,7 +370,7 @@ export default function PlatformClients() {
                           Amount
                         </p>
                         <p className="text-sm font-semibold lg:text-right">
-                          {formatInr(row.subscriptionAmount)}
+                          {row.introEnterprise ? "Complimentary" : formatInr(row.subscriptionAmount)}
                         </p>
                         <div className="mt-1 flex items-center justify-between gap-2 lg:justify-end">
                           <p className="text-[11px] text-[#6B7280]">{formatPurchaseDate(row.purchasedAt)}</p>

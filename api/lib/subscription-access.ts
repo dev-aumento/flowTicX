@@ -5,19 +5,16 @@ import { defaultEntitlement, type PlanLimits } from "@/lib/plan-entitlements";
 import { findOrganizationById } from "./tenant";
 import { findPlatformPlan } from "./platform-plans";
 import { hasMongoConfigured } from "../queries/mongo";
-import { clearSessionCookie } from "./auth";
+import { clearSessionCookie, invalidateAuthUserCache } from "./auth";
+import { isFreeTierPlan, endOfPlanDay } from "./plan-expiry";
+import { updateById } from "../queries/connection";
+import { Collections } from "@db/mongo/collections";
 
 export const PLAN_ENDED_TAG = "[PLAN_ENDED]";
 export const PLAN_CANCELLED_TAG = "[PLAN_CANCELLED]";
 
 export const PLAN_ENDED_MESSAGE = `${PLAN_ENDED_TAG} Your Aaso plan or trial has ended. Purchase a plan to sign in again.`;
 export const PLAN_CANCELLED_MESSAGE = `${PLAN_CANCELLED_TAG} This workspace subscription was cancelled. Purchase a plan to sign in again.`;
-
-function endOfExpiryDay(value: Date) {
-  const date = new Date(value);
-  date.setHours(23, 59, 59, 999);
-  return date;
-}
 
 export type OrgPlanAccess = {
   plan: string | null;
@@ -65,15 +62,37 @@ export function subscriptionExpiryDate(org: OrganizationDoc, durationDays?: numb
   return org.planExpiresAt ? new Date(org.planExpiresAt) : null;
 }
 
+export async function settleIntroEnterprise(org: OrganizationDoc): Promise<OrganizationDoc> {
+  if (!org.introEnterprise || org.workspaceType === "platform") return org;
+
+  const catalog = await findPlatformPlan(org.plan ?? "enterprise");
+  const expires = subscriptionExpiryDate(org, catalog?.durationDays);
+  if (!expires || endOfPlanDay(expires).getTime() >= Date.now()) return org;
+
+  const now = new Date();
+  const updated = await updateById<OrganizationDoc>(Collections.organizations, org.id, {
+    plan: "trial",
+    planStatus: "trial",
+    subscriptionAmount: 0,
+    introEnterprise: false,
+    planStartsAt: now,
+    planExpiresAt: null,
+    updatedAt: now,
+  });
+  invalidateAuthUserCache();
+  return updated ?? { ...org, plan: "trial", planStatus: "trial", subscriptionAmount: 0, introEnterprise: false };
+}
+
 export function subscriptionBlockReason(
   org: Pick<OrganizationDoc, "workspaceType" | "plan" | "planStatus" | "planExpiresAt" | "planStartsAt" | "purchasedAt" | "createdAt">,
   durationDays?: number,
 ): "expired" | "cancelled" | null {
   if (org.workspaceType === "platform") return null;
   if (org.planStatus === "cancelled") return "cancelled";
+  if (isFreeTierPlan(org.plan)) return null;
   const expires = subscriptionExpiryDate(org as OrganizationDoc, durationDays);
   if (!expires) return null;
-  if (endOfExpiryDay(expires).getTime() < Date.now()) return "expired";
+  if (endOfPlanDay(expires).getTime() < Date.now()) return "expired";
   return null;
 }
 
@@ -84,9 +103,10 @@ export async function getSubscriptionBlock(
   if (!hasMongoConfigured()) return null;
   if (user.organizationId == null || user.organizationId <= 0) return null;
 
-  const org = await findOrganizationById(user.organizationId);
-  if (!org || org.workspaceType === "platform") return null;
+  const loaded = await findOrganizationById(user.organizationId);
+  if (!loaded || loaded.workspaceType === "platform") return null;
 
+  const org = await settleIntroEnterprise(loaded);
   const catalog = await findPlatformPlan(org.plan ?? "trial");
   return subscriptionBlockReason(org, catalog?.durationDays);
 }

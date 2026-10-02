@@ -10,6 +10,7 @@ import { GeofenceAutoClockOut } from "@/hooks/useGeofenceAutoClockOut";
 import { useAuth } from "@/hooks/useAuth";
 import { isClientPortalUser } from "@/lib/client-portal";
 import { isPlatformUser } from "@/lib/platform-admin";
+import { PlanExpiryNotice } from "@/components/billing/PlanExpiryNotice";
 
 export function AppLayout({ children }: { children?: ReactNode }) {
   const { user } = useAuth();
@@ -64,6 +65,7 @@ export function AppLayout({ children }: { children?: ReactNode }) {
                 : "flex-1 p-4 pt-[4.5rem] sm:p-5 sm:pt-20 lg:p-6 lg:pt-20 min-w-0"
             }
           >
+            <PlanExpiryNotice />
             {children ?? <Outlet />}
           </main>
         </div>

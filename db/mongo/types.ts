@@ -140,8 +140,10 @@ export type OrganizationDoc = {
   /** Product plan assigned by the Aaso master admin. */
   plan?: SubscriptionPlan;
   planStatus?: SubscriptionStatus;
-  /** Recurring amount in INR. */
+  /** Recurring amount in INR. Zero while the first month of Enterprise is complimentary. */
   subscriptionAmount?: number;
+  /** True only for the complimentary first month of Enterprise given at signup. */
+  introEnterprise?: boolean | null;
   purchasedAt?: Date | null;
   /** Inclusive start of the current plan window. */
   planStartsAt?: Date | null;
@@ -164,6 +166,8 @@ export type OrganizationDoc = {
   pipelineStageLabelOverrides?: Record<string, string> | null;
   /** Optional CRM logo for the platform console (data URL). */
   logoDataUrl?: string | null;
+  /** Set after the one-time sample projects and tasks are created for a new workspace. */
+  sampleWorkspaceSeededAt?: Date | null;
   createdBy: number | null;
   createdAt: Date;
   updatedAt: Date;

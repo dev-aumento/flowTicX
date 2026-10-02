@@ -141,7 +141,9 @@ export const inviteRouter = createRouter({
       }
 
       await ensureSchema();
-      await assertCanInviteMember(organizationId, ctx.user.id);
+      if (inviteKind === "employee") {
+        await assertCanInviteMember(organizationId, ctx.user.id);
+      }
 
       const existingUser = await findUserByEmail(email);
       if (existingUser) {
@@ -377,7 +379,9 @@ export const inviteRouter = createRouter({
         });
       }
 
-      await assertCanAddMember(invite.organizationId, null);
+      if (invite.inviteKind !== "client") {
+        await assertCanAddMember(invite.organizationId, null);
+      }
 
       const email = input.email.toLowerCase();
       if (invite.email && invite.email.toLowerCase() !== email) {

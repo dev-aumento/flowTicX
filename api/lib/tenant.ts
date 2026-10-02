@@ -46,20 +46,23 @@ export async function createOrganization(
     planStatus?: SubscriptionStatus;
     subscriptionAmount?: number;
     purchasedAt?: Date | null;
+    introEnterprise?: boolean;
   },
 ) {
   const now = new Date();
   const workspaceType = options?.workspaceType ?? "standard";
   const isCustomer = workspaceType !== "platform";
+  const plan = options?.plan ?? (isCustomer ? "trial" : undefined);
   return insertDoc<OrganizationDoc>(Collections.organizations, {
     name: name.trim() || Workspace.name,
     workspaceType,
-    plan: options?.plan ?? (isCustomer ? "trial" : undefined),
+    plan,
     planStatus: options?.planStatus ?? (isCustomer ? "trial" : undefined),
     subscriptionAmount: options?.subscriptionAmount ?? (isCustomer ? 0 : undefined),
+    introEnterprise: options?.introEnterprise ?? false,
     purchasedAt: options?.purchasedAt ?? (isCustomer ? now : null),
     planStartsAt: isCustomer ? now : null,
-    planExpiresAt: isCustomer ? addPlanDuration(now, options?.plan ?? "trial") : null,
+    planExpiresAt: isCustomer ? addPlanDuration(now, plan ?? "trial") : null,
     createdBy,
     createdAt: now,
     updatedAt: now,
