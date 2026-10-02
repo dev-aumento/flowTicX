@@ -1,7 +1,8 @@
 import { TRPCClientError } from "@trpc/client";
 import { useState } from "react";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { Loader2, Wallet } from "lucide-react";
+import { ForgotPasswordForm, type PasswordResetPhase } from "@/components/auth/ForgotPasswordForm";
 import { OrgAuthShell } from "@/components/auth/OrgAuthShell";
 import { Input } from "@/components/ui/input";
 import { PasswordInput } from "@/components/ui/password-input";
@@ -21,23 +22,26 @@ export default function FinanceLogin() {
   const {
     login,
     registerFinance,
-    resetPassword,
     isLoggingIn,
     isRegistering,
-    isResettingPassword,
     loginError,
   } = useAuth();
+  const [searchParams] = useSearchParams();
+  const resetEmail = searchParams.get("email")?.trim().toLowerCase() ?? "";
+  const resetCode = searchParams.get("code")?.trim() ?? "";
+  const openedFromResetLink = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(resetEmail) && /^\d{6}$/.test(resetCode);
 
-  const [mode, setMode] = useState<AuthMode>("login");
+  const [mode, setMode] = useState<AuthMode>(openedFromResetLink ? "forgot" : "login");
+  const [resetPhase, setResetPhase] = useState<PasswordResetPhase>(openedFromResetLink ? "code" : "email");
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(openedFromResetLink ? resetEmail : "");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [organizationName, setOrganizationName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const busy = isLoggingIn || isRegistering || isResettingPassword;
+  const busy = isLoggingIn || isRegistering;
 
   function switchMode(next: AuthMode) {
     setMode(next);
@@ -55,37 +59,6 @@ export default function FinanceLogin() {
       await login(email.trim().toLowerCase(), password, { portal: "finance" });
     } catch (err) {
       setError(errorMessage(err, "Unable to sign in. Please try again."));
-    }
-  }
-
-  async function handleForgotPassword(event: React.FormEvent) {
-    event.preventDefault();
-    setError(null);
-    setSuccess(null);
-
-    if (!email.trim()) {
-      setError("Please enter your email");
-      return;
-    }
-    if (password.length < 8) {
-      setError("Password must be at least 8 characters");
-      return;
-    }
-    if (password !== confirmPassword) {
-      setError("Password not match");
-      return;
-    }
-
-    try {
-      await resetPassword(email.trim().toLowerCase(), password);
-      setSuccess("Password has been updated successfully");
-      setPassword("");
-      setConfirmPassword("");
-      window.setTimeout(() => {
-        switchMode("login");
-      }, 1500);
-    } catch (err) {
-      setError(errorMessage(err, "Unable to update password. Please try again."));
     }
   }
 
@@ -137,7 +110,11 @@ export default function FinanceLogin() {
     mode === "register"
       ? "Create a finance workspace for invoices and customers — without office tools."
       : mode === "forgot"
-        ? "Enter a new password for your account manager account."
+        ? resetPhase === "password"
+          ? "Choose a new password."
+          : resetPhase === "code"
+            ? "Enter the verification code from your email."
+            : "Enter your email to get a verification code."
         : "Sign in to your finance dashboard.";
 
   return (
@@ -215,76 +192,25 @@ export default function FinanceLogin() {
       ) : null}
 
       {mode === "forgot" ? (
-        <form onSubmit={handleForgotPassword} className="space-y-5">
-          <div className="space-y-2">
-            <Label htmlFor="forgot-email" className="text-sm font-medium text-gray-700">
-              Email
-            </Label>
-            <Input
-              id="forgot-email"
-              type="email"
-              autoComplete="email"
-              placeholder="finance@company.com"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              className="h-11 border-gray-200 bg-white text-[15px]"
-              required
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="new-password" className="text-sm font-medium text-gray-700">
-              New password
-            </Label>
-            <PasswordInput
-              id="new-password"
-              autoComplete="new-password"
-              placeholder="At least 8 characters"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              className="h-11 border-gray-200 bg-white text-[15px]"
-              required
-              minLength={8}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="confirm-new-password" className="text-sm font-medium text-gray-700">
-              Confirm password
-            </Label>
-            <PasswordInput
-              id="confirm-new-password"
-              autoComplete="new-password"
-              placeholder="Re-enter password"
-              value={confirmPassword}
-              onChange={(event) => setConfirmPassword(event.target.value)}
-              className="h-11 border-gray-200 bg-white text-[15px]"
-              required
-              minLength={8}
-            />
-          </div>
-          {displayError ? <p className="text-sm text-red-500">{displayError}</p> : null}
-          {success ? <p className="text-sm text-green-600">{success}</p> : null}
-          <button
-            type="submit"
-            disabled={busy || !!success}
-            className="w-full h-11 rounded-lg bg-amber-500 hover:bg-amber-600 disabled:opacity-60 text-white font-semibold text-[15px] transition-colors shadow-sm flex items-center justify-center gap-2"
-          >
-            {isResettingPassword ? (
-              <>
-                <Loader2 size={16} className="animate-spin" />
-                Updating password...
-              </>
-            ) : (
-              "Update password"
-            )}
-          </button>
+        <>
+          <ForgotPasswordForm
+            email={email}
+            onEmailChange={setEmail}
+            initialCode={openedFromResetLink ? resetCode : ""}
+            loginPath="/finance/login"
+            inputClassName="h-11"
+            buttonClassName="h-11 rounded-lg bg-amber-500 hover:bg-amber-600"
+            onPhaseChange={setResetPhase}
+            onSuccess={() => switchMode("login")}
+          />
           <button
             type="button"
             onClick={() => switchMode("login")}
-            className="w-full text-sm text-gray-500 hover:text-gray-800"
+            className="mt-3 w-full text-sm text-gray-500 hover:text-gray-800"
           >
             Back to sign in
           </button>
-        </form>
+        </>
       ) : null}
 
       {mode === "register" ? (

@@ -50,6 +50,7 @@ type EmployeeRow = {
   employmentType?: string | null;
   position?: string | null;
   onNoticePeriod?: boolean | null;
+  noticePeriodDays?: number | null;
 };
 
 export default function AdminEmployees({
@@ -547,6 +548,7 @@ export default function AdminEmployees({
                       title="No paid leave for the current month while on notice period"
                     >
                       On notice period
+                      {u.noticePeriodDays ? ` · ${u.noticePeriodDays}d` : ""}
                     </span>
                   ) : null}
                 </div>

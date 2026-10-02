@@ -1,5 +1,6 @@
 import { TRPCClientError } from "@trpc/client";
 import { useState } from "react";
+import { useSearchParams } from "react-router";
 import {
   ArrowLeft,
   Building2,
@@ -15,6 +16,7 @@ import {
   Receipt,
   Users,
 } from "lucide-react";
+import { ForgotPasswordForm } from "@/components/auth/ForgotPasswordForm";
 import { AASO_SITE_URL, BrandLogo } from "@/components/brand/BrandLogo";
 import { Input } from "@/components/ui/input";
 import { PasswordInput } from "@/components/ui/password-input";
@@ -48,17 +50,19 @@ export default function ClientLogin() {
   const {
     login,
     registerClient,
-    resetPassword,
     lookupClientWorkspaces,
     isRegistering,
-    isResettingPassword,
     isLoggingIn,
     isLookingUpClientWorkspaces,
   } = useAuth();
+  const [searchParams] = useSearchParams();
+  const resetEmail = searchParams.get("email")?.trim().toLowerCase() ?? "";
+  const resetCode = searchParams.get("code")?.trim() ?? "";
+  const openedFromResetLink = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(resetEmail) && /^\d{6}$/.test(resetCode);
 
-  const [step, setStep] = useState<Step>("credentials");
+  const [step, setStep] = useState<Step>(openedFromResetLink ? "forgot" : "credentials");
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(openedFromResetLink ? resetEmail : "");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [organizationName, setOrganizationName] = useState("");
@@ -138,35 +142,6 @@ export default function ClientLogin() {
       });
     } catch (err) {
       setError(errorMessage(err, "Unable to sign in. Please try again."));
-    }
-  }
-
-  async function handleForgotPassword(event: React.FormEvent) {
-    event.preventDefault();
-    resetNotices();
-    if (!email.trim()) {
-      setError("Please enter your email");
-      return;
-    }
-    if (password.length < 8) {
-      setError("Password must be at least 8 characters");
-      return;
-    }
-    if (password !== confirmPassword) {
-      setError("Password not match");
-      return;
-    }
-    try {
-      await resetPassword(email.trim().toLowerCase(), password);
-      setSuccess("Password has been updated successfully");
-      setPassword("");
-      setConfirmPassword("");
-      window.setTimeout(() => {
-        setSuccess(null);
-        setStep("credentials");
-      }, 1500);
-    } catch (err) {
-      setError(errorMessage(err, "Unable to update password. Please try again."));
     }
   }
 
@@ -382,53 +357,17 @@ export default function ClientLogin() {
           ) : null}
 
           {step === "forgot" ? (
-            <form onSubmit={handleForgotPassword} className="space-y-4">
-              <div className="text-center">
-                <h1 className="text-xl font-bold text-[#111827]">Reset password</h1>
-                <p className="mt-1 text-sm text-gray-500">Enter a new password for your client account.</p>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="forgot-email">Email</Label>
-                <Input
-                  id="forgot-email"
-                  type="email"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  className="h-11 rounded-xl"
-                  required
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="forgot-password">New password</Label>
-                <PasswordInput
-                  id="forgot-password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  className="h-11 rounded-xl"
-                  required
-                  minLength={8}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="forgot-confirm">Confirm password</Label>
-                <PasswordInput
-                  id="forgot-confirm"
-                  value={confirmPassword}
-                  onChange={(event) => setConfirmPassword(event.target.value)}
-                  className="h-11 rounded-xl"
-                  required
-                  minLength={8}
-                />
-              </div>
-              {error ? <p className="text-sm text-red-500">{error}</p> : null}
-              {success ? <p className="text-sm text-green-600">{success}</p> : null}
-              <GreenButton
-                busy={isResettingPassword}
-                disabled={!!success}
-                label="Update password"
-                busyLabel="Updating password..."
-              />
-            </form>
+            <ForgotPasswordForm
+              email={email}
+              onEmailChange={setEmail}
+              initialCode={openedFromResetLink ? resetCode : ""}
+              loginPath="/client/login"
+              showHeading
+              onSuccess={() => {
+                setSuccess(null);
+                setStep("credentials");
+              }}
+            />
           ) : null}
 
           {step === "register" ? (

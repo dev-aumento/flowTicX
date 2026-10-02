@@ -1,4 +1,5 @@
 import { DEV_USER } from "./dev-mode";
+import { noticePeriodEndsAt } from "@/lib/notice-period";
 import type { UserDoc } from "@db/mongo/types";
 import {
   countCompletedTasks,
@@ -2923,7 +2924,21 @@ export function mockDeleteNotification(userId: number, id: number) {
   return { success: true };
 }
 
+function expireMockNoticePeriods() {
+  const now = new Date();
+  for (const user of users) {
+    if (!user.onNoticePeriod || !user.noticePeriodEndsAt) continue;
+    if (user.noticePeriodEndsAt.getTime() > now.getTime()) continue;
+    user.onNoticePeriod = false;
+    user.noticePeriodDays = null;
+    user.noticePeriodEndsAt = null;
+    user.status = "inactive";
+    user.updatedAt = now;
+  }
+}
+
 export function mockUserList() {
+  expireMockNoticePeriods();
   const sorted = [...users].sort((a, b) => {
     const aOrder = a.sortOrder ?? a.id;
     const bOrder = b.sortOrder ?? b.id;
@@ -3032,6 +3047,8 @@ export type PersonalInfoUpdateInput = {
   headOfDepartmentUserIds?: number[];
   privateNotes?: string | null;
   employmentType?: "full_time" | "intern";
+  onNoticePeriod?: boolean;
+  noticePeriodDays?: number | null;
 };
 
 function mockPersonalRecord(
@@ -3063,6 +3080,8 @@ function mockPersonalRecord(
     notificationLanguage: user.notificationLanguage ?? "en",
     employmentType: user.employmentType === "intern" ? "intern" : "full_time",
     onNoticePeriod: Boolean(user.onNoticePeriod),
+    noticePeriodDays: user.noticePeriodDays ?? null,
+    noticePeriodEndsAt: user.noticePeriodEndsAt ?? null,
     headOfDepartmentUserIds: headIds,
     headsOfDepartment: headIds
       .map((id) => userById(id))
@@ -3078,6 +3097,7 @@ export function mockGetPersonalInfo(
   userId: number,
   options?: { includePrivateNotes?: boolean },
 ) {
+  expireMockNoticePeriods();
   const user = userById(userId);
   if (!user) throw new Error("User not found");
   return mockPersonalRecord(user, options);
@@ -3117,7 +3137,23 @@ export function mockUpdatePersonalInfo(
     user.employmentType = data.employmentType;
   }
   if (data.onNoticePeriod !== undefined) {
-    user.onNoticePeriod = data.onNoticePeriod;
+    const wasOnNotice = Boolean(user.onNoticePeriod);
+    const previousDays = user.noticePeriodDays ?? null;
+    if (data.onNoticePeriod) {
+      const days = data.noticePeriodDays ?? previousDays;
+      if (days == null || days < 1) {
+        throw new Error("Enter how many days this employee must serve on notice.");
+      }
+      user.onNoticePeriod = true;
+      user.noticePeriodDays = days;
+      if (!wasOnNotice || days !== previousDays || !user.noticePeriodEndsAt) {
+        user.noticePeriodEndsAt = noticePeriodEndsAt(days);
+      }
+    } else {
+      user.onNoticePeriod = false;
+      user.noticePeriodDays = null;
+      user.noticePeriodEndsAt = null;
+    }
   }
   if (data.headOfDepartmentUserIds !== undefined) {
     user.headOfDepartmentUserIds = data.headOfDepartmentUserIds;

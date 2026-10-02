@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
+import { noticePeriodEndsAt } from "@/lib/notice-period";
 import type { EmploymentType, SafeUser, SexOption, UserDoc } from "@db/mongo/types";
 import { findById } from "./mongo";
 import { Collections } from "@db/mongo/collections";
@@ -64,6 +65,7 @@ export const personalInfoUpdateSchema = z.object({
   notificationLanguage: z.string().max(20).nullable().optional(),
   employmentType: z.enum(["full_time", "intern"]).optional(),
   onNoticePeriod: z.boolean().optional(),
+  noticePeriodDays: z.number().int().min(1).max(365).nullable().optional(),
   headOfDepartmentUserIds: z.array(z.number()).optional(),
 });
 
@@ -96,6 +98,8 @@ export type PersonalInfoRecord = {
   notificationLanguage: string | null;
   employmentType: EmploymentType;
   onNoticePeriod: boolean;
+  noticePeriodDays: number | null;
+  noticePeriodEndsAt: Date | null;
   headOfDepartmentUserIds: number[];
   /** Only populated for the owning employee; never returned to admin/HR. */
   privateNotes?: string | null;
@@ -164,7 +168,25 @@ export function buildPersonalInfoUserPatch(
     patch.employmentType = input.employmentType;
   }
   if (input.onNoticePeriod !== undefined) {
-    patch.onNoticePeriod = input.onNoticePeriod;
+    if (input.onNoticePeriod) {
+      const days = input.noticePeriodDays ?? existingUser.noticePeriodDays ?? null;
+      if (days == null || days < 1) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Enter how many days this employee must serve on notice.",
+        });
+      }
+      patch.onNoticePeriod = true;
+      patch.noticePeriodDays = days;
+      const daysChanged = days !== existingUser.noticePeriodDays;
+      if (!existingUser.onNoticePeriod || daysChanged || !existingUser.noticePeriodEndsAt) {
+        patch.noticePeriodEndsAt = noticePeriodEndsAt(days);
+      }
+    } else {
+      patch.onNoticePeriod = false;
+      patch.noticePeriodDays = null;
+      patch.noticePeriodEndsAt = null;
+    }
   }
   if (input.headOfDepartmentUserIds !== undefined) {
     patch.headOfDepartmentUserIds = input.headOfDepartmentUserIds;
@@ -239,6 +261,8 @@ export function personalFieldsFromUser(
     notificationLanguage: user.notificationLanguage ?? null,
     employmentType: user.employmentType === "intern" ? "intern" : "full_time",
     onNoticePeriod: Boolean(user.onNoticePeriod),
+    noticePeriodDays: user.noticePeriodDays ?? null,
+    noticePeriodEndsAt: user.noticePeriodEndsAt ?? null,
     headOfDepartmentUserIds: user.headOfDepartmentUserIds ?? [],
   };
 

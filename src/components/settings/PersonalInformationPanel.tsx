@@ -17,6 +17,14 @@ import { CalendarDateSelect } from "@/components/shared/CalendarDateSelect";
 import { refreshDashboardPage } from "@/lib/dashboard-refresh";
 import { downloadFileFromBase64, readFileAsBase64 } from "@/lib/task-files";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 
 export const SEX_OPTIONS = [
   { value: "male", label: "Male" },
@@ -58,6 +66,7 @@ type PersonalForm = {
   privateNotes: string;
   employmentType: "full_time" | "intern";
   onNoticePeriod: boolean;
+  noticePeriodDays: number | null;
 };
 
 const EMPTY_FORM: PersonalForm = {
@@ -82,6 +91,7 @@ const EMPTY_FORM: PersonalForm = {
   privateNotes: "",
   employmentType: "full_time",
   onNoticePeriod: false,
+  noticePeriodDays: null,
 };
 
 function toDateInputValue(value: Date | string | null | undefined) {
@@ -124,6 +134,7 @@ function formFromPersonalData(data: {
   privateNotes?: string | null;
   employmentType?: "full_time" | "intern" | string | null;
   onNoticePeriod?: boolean | null;
+  noticePeriodDays?: number | null;
 }): PersonalForm {
   return {
     firstName: data.firstName ?? "",
@@ -147,6 +158,7 @@ function formFromPersonalData(data: {
     privateNotes: data.privateNotes ?? "",
     employmentType: data.employmentType === "intern" ? "intern" : "full_time",
     onNoticePeriod: Boolean(data.onNoticePeriod),
+    noticePeriodDays: data.noticePeriodDays ?? null,
   };
 }
 
@@ -218,6 +230,8 @@ export function PersonalInformationPanel({
   const [editing, setEditing] = useState(false);
   const [saved, setSaved] = useState(false);
   const [form, setForm] = useState<PersonalForm>(EMPTY_FORM);
+  const [noticeDialogOpen, setNoticeDialogOpen] = useState(false);
+  const [noticeDaysDraft, setNoticeDaysDraft] = useState("30");
 
   const isSelf = userId == null || userId === user?.id;
   const fieldGrid = wide
@@ -344,6 +358,10 @@ export function PersonalInformationPanel({
       onError?.("Enter a valid work email.");
       return;
     }
+    if (canEditNoticePeriod && form.onNoticePeriod && (form.noticePeriodDays == null || form.noticePeriodDays < 1)) {
+      onError?.("Enter how many days this employee must serve on notice.");
+      return;
+    }
 
     const payload = compact
       ? {
@@ -380,7 +398,9 @@ export function PersonalInformationPanel({
             ? { headOfDepartmentUserIds: form.headOfDepartmentUserIds }
             : {}),
           ...(canEditEmploymentType ? { employmentType: form.employmentType } : {}),
-          ...(canEditNoticePeriod ? { onNoticePeriod: form.onNoticePeriod } : {}),
+          ...(canEditNoticePeriod
+            ? { onNoticePeriod: form.onNoticePeriod, noticePeriodDays: form.noticePeriodDays }
+            : {}),
           ...(isSelf ? { privateNotes: form.privateNotes.trim() || null } : {}),
         };
 
@@ -391,7 +411,11 @@ export function PersonalInformationPanel({
 
     if (userId != null) {
       if (noticeOnlyEditor) {
-        adminUpdateMutation.mutate({ id: userId, onNoticePeriod: form.onNoticePeriod });
+        adminUpdateMutation.mutate({
+          id: userId,
+          onNoticePeriod: form.onNoticePeriod,
+          noticePeriodDays: form.noticePeriodDays,
+        });
         return;
       }
       adminUpdateMutation.mutate({ id: userId, ...payload });
@@ -550,7 +574,13 @@ export function PersonalInformationPanel({
           {canEditNoticePeriod ? (
             <FieldRow
               label="Notice period"
-              value={data.onNoticePeriod ? "On notice period" : "Not on notice"}
+              value={
+                data.onNoticePeriod
+                  ? data.noticePeriodDays
+                    ? `On notice period · ${data.noticePeriodDays} day${data.noticePeriodDays === 1 ? "" : "s"}`
+                    : "On notice period"
+                  : "Not on notice"
+              }
               className="border-b border-gray-100"
             />
           ) : null}
@@ -736,9 +766,14 @@ export function PersonalInformationPanel({
               <label className="flex items-start gap-3 cursor-pointer">
                 <Checkbox
                   checked={form.onNoticePeriod}
-                  onCheckedChange={(checked) =>
-                    setForm((prev) => ({ ...prev, onNoticePeriod: checked === true }))
-                  }
+                  onCheckedChange={(checked) => {
+                    if (checked === true) {
+                      setNoticeDaysDraft(String(form.noticePeriodDays ?? 30));
+                      setNoticeDialogOpen(true);
+                      return;
+                    }
+                    setForm((prev) => ({ ...prev, onNoticePeriod: false, noticePeriodDays: null }));
+                  }}
                   className="mt-0.5"
                 />
                 <span>
@@ -746,13 +781,63 @@ export function PersonalInformationPanel({
                     Employee is on notice period
                   </span>
                   <span className="block text-xs text-gray-500 mt-0.5">
-                    While enabled, paid leave is not provided for the current month (and later months
-                    until this is turned off). Visible to admin, HR, and project managers.
+                    {form.onNoticePeriod && form.noticePeriodDays
+                      ? `Serving ${form.noticePeriodDays} day${form.noticePeriodDays === 1 ? "" : "s"}. When that time is up, the badge is removed and the employee is marked inactive.`
+                      : "You will be asked how many days they must serve. When that time is up, the badge is removed and the employee is marked inactive."}
                   </span>
                 </span>
               </label>
+              {form.onNoticePeriod ? (
+                <button
+                  type="button"
+                  className="mt-2 ml-7 text-xs font-medium text-[#2563EB]"
+                  onClick={() => {
+                    setNoticeDaysDraft(String(form.noticePeriodDays ?? 30));
+                    setNoticeDialogOpen(true);
+                  }}
+                >
+                  Change days
+                </button>
+              ) : null}
             </div>
           ) : null}
+          <Dialog open={noticeDialogOpen} onOpenChange={setNoticeDialogOpen}>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Notice period</DialogTitle>
+              </DialogHeader>
+              <label className="block text-sm text-gray-700">
+                How many days does this employee need to serve?
+                <input
+                  type="number"
+                  min={1}
+                  max={365}
+                  value={noticeDaysDraft}
+                  onChange={(e) => setNoticeDaysDraft(e.target.value)}
+                  className="mt-2 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                />
+              </label>
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setNoticeDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => {
+                    const days = Number.parseInt(noticeDaysDraft, 10);
+                    if (!Number.isFinite(days) || days < 1 || days > 365) {
+                      onError?.("Enter a notice period between 1 and 365 days.");
+                      return;
+                    }
+                    setForm((prev) => ({ ...prev, onNoticePeriod: true, noticePeriodDays: days }));
+                    setNoticeDialogOpen(false);
+                  }}
+                >
+                  Confirm
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
           <FormField label="Sex">
             <select
               value={form.sex}

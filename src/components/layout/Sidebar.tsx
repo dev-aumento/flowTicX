@@ -125,7 +125,7 @@ function SidebarPanel({
     if (leadershipNav) {
       const items: NavItem[] = [
         { path: "/", icon: LayoutDashboard, label: "Dashboard" },
-        ...(!hidePersonalNav
+        ...(!hidePersonalNav || isAdmin
           ? [
               {
                 path: "/tasks",
@@ -237,7 +237,7 @@ function SidebarPanel({
     // Employee / HR: flat list (existing behavior)
     const items: NavItem[] = [
       { path: "/", icon: LayoutDashboard, label: "Dashboard" },
-      ...(hidePersonalNav
+      ...(hidePersonalNav && !isAdmin
         ? []
         : [{ path: "/tasks", icon: ListTodo, label: "My Tasks" }]),
       { path: "/admin/tasks", icon: ClipboardList, label: "All Tasks" },

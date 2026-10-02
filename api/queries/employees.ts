@@ -47,6 +47,8 @@ function personalPatchFromUser(user: UserDoc): Partial<EmployeeDoc> {
     notificationLanguage: user.notificationLanguage ?? null,
     employmentType: user.employmentType === "intern" ? "intern" : "full_time",
     onNoticePeriod: Boolean(user.onNoticePeriod),
+    noticePeriodDays: user.noticePeriodDays ?? null,
+    noticePeriodEndsAt: user.noticePeriodEndsAt ?? null,
     headOfDepartmentUserIds: user.headOfDepartmentUserIds ?? [],
   };
 }

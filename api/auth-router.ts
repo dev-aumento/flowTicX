@@ -38,6 +38,19 @@ import {
   resendClientLoginCode,
 } from "./lib/client-login-challenge";
 import { isLoginEmailConfigured, sendClientLoginCodeEmail } from "./lib/send-login-code";
+import {
+  checkPasswordResetCode,
+  clearPasswordResetCode,
+  issuePasswordResetCode,
+  verifyPasswordResetCode,
+} from "./lib/password-reset";
+import {
+  isPasswordResetEmailConfigured,
+  PASSWORD_RESET_LOGIN_PATHS,
+  sendPasswordResetEmail,
+  type PasswordResetLoginPath,
+} from "./lib/send-password-reset";
+import { runWithRequestOrigin } from "./lib/request-origin";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { canManageNoticePeriod } from "@/lib/leave-policy";
@@ -65,6 +78,59 @@ function splitName(fullName: string) {
 
 function useMemoryStore() {
   return !hasMongoConfigured();
+}
+
+async function activeAccountsForEmail(email: string) {
+  const normalized = email.trim().toLowerCase();
+  if (!useMemoryStore()) {
+    try {
+      await ensureSchema();
+    } catch (error) {
+      console.error("[auth] Database setup failed:", error);
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Database is not available. Check your MongoDB connection.",
+      });
+    }
+  }
+
+  const matches = useMemoryStore()
+    ? mock.mockFindUsersByEmail(normalized)
+    : await findUsersByEmail(normalized);
+  if (matches.length === 0) {
+    throw new TRPCError({
+      code: "NOT_FOUND",
+      message: "No account found with this email",
+    });
+  }
+  const users = matches.filter((user) => String(user.status).toLowerCase() === "active");
+  if (users.length === 0) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Account is not active",
+    });
+  }
+  return { email: normalized, users };
+}
+
+function assertPasswordResetCode(error: "missing" | "expired" | "invalid" | "locked" | null) {
+  if (!error) return;
+  if (error === "invalid") {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "That verification code is incorrect.",
+    });
+  }
+  if (error === "locked") {
+    throw new TRPCError({
+      code: "TOO_MANY_REQUESTS",
+      message: "Too many attempts. Request a new code.",
+    });
+  }
+  throw new TRPCError({
+    code: "BAD_REQUEST",
+    message: "That verification code has expired. Request a new code.",
+  });
 }
 
 function workspaceRoleLabel(user: { role?: string | null; position?: string | null }) {
@@ -662,6 +728,7 @@ export const authRouter = createRouter({
       const sanitized: SelfPersonalInfoUpdateInput = { ...input };
       if (!canManageNoticePeriod(ctx.user)) {
         delete sanitized.onNoticePeriod;
+        delete sanitized.noticePeriodDays;
       }
 
       if (isAuthDisabled() || useMemoryStore()) {
@@ -815,10 +882,83 @@ export const authRouter = createRouter({
       return { success: true };
     }),
 
+  requestPasswordReset: publicQuery
+    .input(
+      z.object({
+        email: z.string().email().max(320),
+        loginPath: z.enum(PASSWORD_RESET_LOGIN_PATHS).default("/login"),
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      if (isAuthDisabled()) {
+        return { sent: true };
+      }
+
+      return runWithRequestOrigin(ctx.req, async () => {
+        const { email } = await activeAccountsForEmail(input.email);
+        if (!isPasswordResetEmailConfigured()) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "Password reset email is not configured.",
+          });
+        }
+
+        const code = createLoginCode();
+        const issued = await issuePasswordResetCode(email, code);
+        if (issued.retryAfterSeconds > 0) {
+          throw new TRPCError({
+            code: "TOO_MANY_REQUESTS",
+            message: `Please wait ${issued.retryAfterSeconds} seconds before requesting another code.`,
+          });
+        }
+
+        try {
+          const sent = await sendPasswordResetEmail({
+            to: email,
+            code,
+            loginPath: input.loginPath as PasswordResetLoginPath,
+          });
+          if (!sent.delivered) {
+            await clearPasswordResetCode(email);
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message: "Password reset email is not configured.",
+            });
+          }
+        } catch (error) {
+          if (error instanceof TRPCError) throw error;
+          await clearPasswordResetCode(email);
+          console.error("[auth] Password reset email failed");
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "We couldn't send the verification email. Try again in a moment.",
+          });
+        }
+
+        return { sent: true };
+      });
+    }),
+
+  confirmPasswordResetCode: publicQuery
+    .input(
+      z.object({
+        email: z.string().email().max(320),
+        code: z.string().regex(/^\d{6}$/),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      if (isAuthDisabled()) return { valid: true };
+      const { email } = await activeAccountsForEmail(input.email);
+      const check = await checkPasswordResetCode(email, input.code);
+      assertPasswordResetCode(check.error);
+      return { valid: true };
+    }),
+
   resetPassword: publicQuery
     .input(
       z.object({
         email: z.string().email().max(320),
+        code: z.string().regex(/^\d{6}$/),
         newPassword: z.string().min(8).max(128),
       }),
     )
@@ -827,65 +967,27 @@ export const authRouter = createRouter({
         return { success: true };
       }
 
-      if (useMemoryStore()) {
-        const email = input.email.trim().toLowerCase();
-        const user = mock.mockFindUserByEmail(email);
-        if (!user) {
-          throw new TRPCError({
-            code: "NOT_FOUND",
-            message: "No account found with this email",
-          });
-        }
-        if (user.status !== "active") {
-          throw new TRPCError({
-            code: "FORBIDDEN",
-            message: "Account is not active",
-          });
-        }
-        mock.mockSetPasswordHash(user.id, await hashPassword(input.newPassword));
-        invalidateAuthUserCache(user.id);
-        return { success: true };
-      }
-
-      try {
-        await ensureSchema();
-      } catch (error) {
-        console.error("[auth] Database setup failed:", error);
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: "Database is not available. Check your MongoDB connection.",
-        });
-      }
-
-      const email = input.email.trim().toLowerCase();
-      const user = await findUserByEmail(email);
-      if (!user) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "No account found with this email",
-        });
-      }
-
-      if (user.status !== "active") {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Account is not active",
-        });
-      }
+      const { email, users } = await activeAccountsForEmail(input.email);
+      const check = await verifyPasswordResetCode(email, input.code);
+      assertPasswordResetCode(check.error);
 
       const passwordHash = await hashPassword(input.newPassword);
-      const updated = await updateById<UserDoc>(Collections.users, user.id, {
-        passwordHash,
-        updatedAt: new Date(),
-      });
-
-      if (!updated) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "User not found" });
+      for (const user of users) {
+        if (useMemoryStore()) {
+          mock.mockSetPasswordHash(user.id, passwordHash);
+          invalidateAuthUserCache(user.id);
+          continue;
+        }
+        const updated = await updateById<UserDoc>(Collections.users, user.id, {
+          passwordHash,
+          updatedAt: new Date(),
+        });
+        if (!updated) continue;
+        invalidateAuthUserCache(user.id);
+        await syncEmployeeFromUser(updated);
       }
 
-      invalidateAuthUserCache(user.id);
-      await syncEmployeeFromUser(updated);
-
+      await clearPasswordResetCode(email);
       return { success: true };
     }),
 

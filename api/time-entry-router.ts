@@ -1291,7 +1291,7 @@ export const timeEntryRouter = createRouter({
       const userCol = await getCollection<UserDoc>(Collections.users);
       const allUsers = (
         await userCol
-          .find({ status: "active" })
+          .find({ status: "active", ...orgFilter(ctx.user) })
           .project({ id: 1, name: 1, avatar: 1, role: 1, department: 1 })
           .toArray()
       ).filter((user) => isAttendanceTrackableUser(user));

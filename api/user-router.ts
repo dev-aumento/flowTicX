@@ -23,6 +23,7 @@ import {
 import { assertPermission, assertAnyPermission, hasPermission } from "./lib/permissions";
 import { orgFilter, belongsToUserOrg } from "./lib/tenant";
 import { canManageNoticePeriod, isTaskAssignableUser } from "@/lib/leave-policy";
+import { expireFinishedNoticePeriods } from "./lib/notice-period";
 import { isInvitedStaffClient } from "./lib/client-projects";
 import { assignedEmployeeIdsOf } from "./lib/client-visibility";
 
@@ -52,7 +53,7 @@ function restrictPersonalInfoInputForCaller(
       message: "You can only update the notice period flag",
     });
   }
-  return { onNoticePeriod: data.onNoticePeriod };
+  return { onNoticePeriod: data.onNoticePeriod, noticePeriodDays: data.noticePeriodDays ?? null };
 }
 
 async function assertWorkEmailAvailable(
@@ -147,6 +148,7 @@ export const userRouter = createRouter({
       if (isAuthDisabled() || !hasMongoConfigured()) return mock.mockUserList();
 
       await ensureSchema();
+      await expireFinishedNoticePeriods(ctx.user.organizationId);
       const { search, role, status, page = 1, limit = 20 } = input || {};
       const skip = (page - 1) * limit;
 
@@ -284,6 +286,7 @@ export const userRouter = createRouter({
       }
 
       await ensureSchema();
+      await expireFinishedNoticePeriods(ctx.user.organizationId);
       const user = await findById<UserDoc>(Collections.users, input.id);
       if (!user) {
         throw new TRPCError({ code: "NOT_FOUND", message: "User not found" });

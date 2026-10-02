@@ -156,6 +156,8 @@ export function useAuth(_options?: UseAuthOptions) {
   });
 
   const logoutMutation = trpc.auth.logout.useMutation();
+  const requestPasswordResetMutation = trpc.auth.requestPasswordReset.useMutation();
+  const confirmPasswordResetCodeMutation = trpc.auth.confirmPasswordResetCode.useMutation();
   const resetPasswordMutation = trpc.auth.resetPassword.useMutation();
 
   const lookupClientWorkspaces = useCallback(
@@ -308,12 +310,32 @@ export function useAuth(_options?: UseAuthOptions) {
     [registerPlatformMutation],
   );
 
+  const requestPasswordReset = useCallback(
+    (email: string, loginPath: "/login" | "/client/login" | "/finance/login" | "/admin/login") => {
+      if (AUTH_DISABLED) {
+        return Promise.resolve({ sent: true });
+      }
+      return requestPasswordResetMutation.mutateAsync({ email, loginPath });
+    },
+    [requestPasswordResetMutation],
+  );
+
+  const confirmPasswordResetCode = useCallback(
+    (email: string, code: string) => {
+      if (AUTH_DISABLED) {
+        return Promise.resolve({ valid: true });
+      }
+      return confirmPasswordResetCodeMutation.mutateAsync({ email, code });
+    },
+    [confirmPasswordResetCodeMutation],
+  );
+
   const resetPassword = useCallback(
-    (email: string, newPassword: string) => {
+    (email: string, code: string, newPassword: string) => {
       if (AUTH_DISABLED) {
         return Promise.resolve({ success: true });
       }
-      return resetPasswordMutation.mutateAsync({ email, newPassword });
+      return resetPasswordMutation.mutateAsync({ email, code, newPassword });
     },
     [resetPasswordMutation],
   );
@@ -374,6 +396,8 @@ export function useAuth(_options?: UseAuthOptions) {
         registerClientMutation.isPending ||
         registerFinanceMutation.isPending ||
         registerPlatformMutation.isPending,
+      isRequestingPasswordReset: requestPasswordResetMutation.isPending,
+      isConfirmingPasswordReset: confirmPasswordResetCodeMutation.isPending,
       isResettingPassword: resetPasswordMutation.isPending,
       loginError: loginMutation.error,
       error,
@@ -388,6 +412,8 @@ export function useAuth(_options?: UseAuthOptions) {
       registerClient,
       registerFinance,
       registerPlatform,
+      requestPasswordReset,
+      confirmPasswordResetCode,
       resetPassword,
       logout,
       refresh: refetch,
@@ -407,6 +433,8 @@ export function useAuth(_options?: UseAuthOptions) {
       registerClientMutation.isPending,
       registerFinanceMutation.isPending,
       registerPlatformMutation.isPending,
+      requestPasswordResetMutation.isPending,
+      confirmPasswordResetCodeMutation.isPending,
       resetPasswordMutation.isPending,
       loginMutation.error,
       error,
@@ -421,6 +449,8 @@ export function useAuth(_options?: UseAuthOptions) {
       registerClient,
       registerFinance,
       registerPlatform,
+      requestPasswordReset,
+      confirmPasswordResetCode,
       resetPassword,
       logout,
       refetch,

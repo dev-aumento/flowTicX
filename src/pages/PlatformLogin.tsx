@@ -1,7 +1,8 @@
 import { TRPCClientError } from "@trpc/client";
 import { useState } from "react";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { Loader2, Shield } from "lucide-react";
+import { ForgotPasswordForm, type PasswordResetPhase } from "@/components/auth/ForgotPasswordForm";
 import { OrgAuthShell } from "@/components/auth/OrgAuthShell";
 import { Input } from "@/components/ui/input";
 import { PasswordInput } from "@/components/ui/password-input";
@@ -21,25 +22,28 @@ export default function PlatformLogin() {
   const {
     login,
     registerPlatform,
-    resetPassword,
     isLoggingIn,
     isRegistering,
-    isResettingPassword,
     loginError,
   } = useAuth();
+  const [searchParams] = useSearchParams();
+  const resetEmail = searchParams.get("email")?.trim().toLowerCase() ?? "";
+  const resetCode = searchParams.get("code")?.trim() ?? "";
+  const openedFromResetLink = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(resetEmail) && /^\d{6}$/.test(resetCode);
   const { data: signup } = trpc.auth.platformSignupAvailable.useQuery(undefined, {
     staleTime: 30_000,
   });
 
-  const [mode, setMode] = useState<AuthMode>("login");
+  const [mode, setMode] = useState<AuthMode>(openedFromResetLink ? "forgot" : "login");
+  const [resetPhase, setResetPhase] = useState<PasswordResetPhase>(openedFromResetLink ? "code" : "email");
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(openedFromResetLink ? resetEmail : "");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const busy = isLoggingIn || isRegistering || isResettingPassword;
+  const busy = isLoggingIn || isRegistering;
   const canRegister = signup?.available === true;
 
   function switchMode(next: AuthMode) {
@@ -58,35 +62,6 @@ export default function PlatformLogin() {
       await login(email.trim().toLowerCase(), password, { portal: "platform" });
     } catch (err) {
       setError(errorMessage(err, "Unable to sign in. Please try again."));
-    }
-  }
-
-  async function handleForgotPassword(event: React.FormEvent) {
-    event.preventDefault();
-    setError(null);
-    setSuccess(null);
-
-    if (!email.trim()) {
-      setError("Please enter your email");
-      return;
-    }
-    if (password.length < 8) {
-      setError("Password must be at least 8 characters");
-      return;
-    }
-    if (password !== confirmPassword) {
-      setError("Passwords do not match");
-      return;
-    }
-
-    try {
-      await resetPassword(email.trim().toLowerCase(), password);
-      setSuccess("Password has been updated successfully");
-      setPassword("");
-      setConfirmPassword("");
-      window.setTimeout(() => switchMode("login"), 1500);
-    } catch (err) {
-      setError(errorMessage(err, "Unable to update password. Please try again."));
     }
   }
 
@@ -134,7 +109,11 @@ export default function PlatformLogin() {
     mode === "register"
       ? "First-time setup for the Aaso platform console."
       : mode === "forgot"
-        ? "Enter a new password for your platform account."
+        ? resetPhase === "password"
+          ? "Choose a new password."
+          : resetPhase === "code"
+            ? "Enter the verification code from your email."
+            : "Enter your email to get a verification code."
         : "Monitor customers, trials, and subscription activity.";
 
   return (
@@ -202,64 +181,25 @@ export default function PlatformLogin() {
       ) : null}
 
       {mode === "forgot" ? (
-        <form onSubmit={handleForgotPassword} className="space-y-5">
-          <div className="space-y-2">
-            <Label htmlFor="forgot-email">Email</Label>
-            <Input
-              id="forgot-email"
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              className="h-11 border-gray-200 bg-white text-[15px]"
-              required
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="forgot-password">New password</Label>
-            <PasswordInput
-              id="forgot-password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              className="h-11 border-gray-200 bg-white text-[15px]"
-              required
-              minLength={8}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="forgot-confirm">Confirm password</Label>
-            <PasswordInput
-              id="forgot-confirm"
-              value={confirmPassword}
-              onChange={(event) => setConfirmPassword(event.target.value)}
-              className="h-11 border-gray-200 bg-white text-[15px]"
-              required
-              minLength={8}
-            />
-          </div>
-          {displayError ? <p className="text-sm text-red-500">{displayError}</p> : null}
-          {success ? <p className="text-sm text-emerald-600">{success}</p> : null}
-          <button
-            type="submit"
-            disabled={busy}
-            className="w-full h-11 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-60 text-white font-semibold text-[15px] flex items-center justify-center gap-2"
-          >
-            {isResettingPassword ? (
-              <>
-                <Loader2 size={16} className="animate-spin" />
-                Updating...
-              </>
-            ) : (
-              "Update password"
-            )}
-          </button>
+        <>
+          <ForgotPasswordForm
+            email={email}
+            onEmailChange={setEmail}
+            initialCode={openedFromResetLink ? resetCode : ""}
+            loginPath="/admin/login"
+            inputClassName="h-11"
+            buttonClassName="h-11 rounded-lg"
+            onPhaseChange={setResetPhase}
+            onSuccess={() => switchMode("login")}
+          />
           <button
             type="button"
             onClick={() => switchMode("login")}
-            className="w-full text-sm text-gray-500 hover:text-gray-800"
+            className="mt-3 w-full text-sm text-gray-500 hover:text-gray-800"
           >
             Back to sign in
           </button>
-        </form>
+        </>
       ) : null}
 
       {mode === "register" && canRegister ? (

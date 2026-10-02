@@ -1,6 +1,6 @@
 import { TRPCClientError } from "@trpc/client";
 import { useEffect, useState } from "react";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import {
   ArrowLeft,
   ArrowRight,
@@ -13,6 +13,7 @@ import {
   UserRound,
   Users,
 } from "lucide-react";
+import { ForgotPasswordForm, type PasswordResetPhase } from "@/components/auth/ForgotPasswordForm";
 import { LoginShowcase } from "@/components/auth/LoginShowcase";
 import { AASO_SITE_URL, BrandLogo } from "@/components/brand/BrandLogo";
 import { Input } from "@/components/ui/input";
@@ -73,17 +74,20 @@ export default function Login() {
     login,
     lookupWorkspaces,
     registerAdmin,
-    resetPassword,
     isLoggingIn,
     isLookingUpWorkspaces,
     isRegistering,
-    isResettingPassword,
   } = useAuth();
+  const [searchParams] = useSearchParams();
+  const resetEmail = searchParams.get("email")?.trim().toLowerCase() ?? "";
+  const resetCode = searchParams.get("code")?.trim() ?? "";
+  const openedFromResetLink = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(resetEmail) && /^\d{6}$/.test(resetCode);
 
-  const [mode, setMode] = useState<AuthMode>("login");
+  const [mode, setMode] = useState<AuthMode>(openedFromResetLink ? "forgot" : "login");
   const [step, setStep] = useState<LoginStep>("email");
+  const [resetPhase, setResetPhase] = useState<PasswordResetPhase>(openedFromResetLink ? "code" : "email");
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(openedFromResetLink ? resetEmail : "");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [organizationName, setOrganizationName] = useState("");
@@ -218,38 +222,6 @@ export default function Login() {
     }
   }
 
-  async function handleForgotPassword(event: React.FormEvent) {
-    event.preventDefault();
-    resetNotices();
-
-    if (!email.trim()) {
-      setError("Please enter your email");
-      return;
-    }
-    if (password.length < 8) {
-      setError("Password must be at least 8 characters");
-      return;
-    }
-    if (password !== confirmPassword) {
-      setError("Password not match");
-      return;
-    }
-
-    try {
-      await resetPassword(email.trim().toLowerCase(), password);
-      setSuccess("Password has been updated successfully");
-      setPassword("");
-      setConfirmPassword("");
-      window.setTimeout(() => {
-        setSuccess(null);
-        setMode("login");
-        setStep(selectedWorkspace ? "password" : "email");
-      }, 1500);
-    } catch (err) {
-      setError(errorMessage(err, "Unable to update password. Please try again."));
-    }
-  }
-
   async function handleRegisterAdmin(event: React.FormEvent) {
     event.preventDefault();
     resetNotices();
@@ -310,7 +282,11 @@ export default function Login() {
     mode === "admin"
       ? "Set up your company workspace and invite your team."
       : mode === "forgot"
-        ? "Enter a new password for your account."
+        ? resetPhase === "password"
+          ? "Choose a new password."
+          : resetPhase === "code"
+            ? "Enter the verification code from your email."
+            : "Enter your email to get a verification code."
         : step === "workspaces"
           ? "Select your workspace to continue."
           : step === "password"
@@ -520,52 +496,19 @@ export default function Login() {
               ) : null}
 
               {mode === "forgot" ? (
-                <form onSubmit={handleForgotPassword} className="space-y-4">
-                  <Field label="Email" htmlFor="forgot-email" icon={Mail}>
-                    <Input
-                      id="forgot-email"
-                      type="email"
-                      autoComplete="email"
-                      placeholder="you@company.com"
-                      value={email}
-                      onChange={(event) => setEmail(event.target.value)}
-                      className={fieldClass}
-                      required
-                    />
-                  </Field>
-                  <Field label="New password" htmlFor="new-password" icon={Lock}>
-                    <PasswordInput
-                      id="new-password"
-                      autoComplete="new-password"
-                      placeholder="At least 8 characters"
-                      value={password}
-                      onChange={(event) => setPassword(event.target.value)}
-                      className={fieldClass}
-                      required
-                      minLength={8}
-                    />
-                  </Field>
-                  <Field label="Confirm password" htmlFor="confirm-new-password" icon={Lock}>
-                    <PasswordInput
-                      id="confirm-new-password"
-                      autoComplete="new-password"
-                      placeholder="Re-enter new password"
-                      value={confirmPassword}
-                      onChange={(event) => setConfirmPassword(event.target.value)}
-                      className={fieldClass}
-                      required
-                      minLength={8}
-                    />
-                  </Field>
-                  {error ? <p className="text-sm text-red-500">{error}</p> : null}
-                  {success ? <p className="text-sm text-green-600">{success}</p> : null}
-                  <PrimaryButton
-                    busy={isResettingPassword}
-                    disabled={!!success}
-                    label="Update password"
-                    busyLabel="Updating password..."
-                  />
-                </form>
+                <ForgotPasswordForm
+                  email={email}
+                  onEmailChange={setEmail}
+                  initialCode={openedFromResetLink ? resetCode : ""}
+                  loginPath="/login"
+                  inputClassName="pl-3.5"
+                  onPhaseChange={setResetPhase}
+                  onSuccess={() => {
+                    setSuccess(null);
+                    setMode("login");
+                    setStep(selectedWorkspace ? "password" : "email");
+                  }}
+                />
               ) : null}
 
               {mode === "admin" ? (

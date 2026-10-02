@@ -242,6 +242,10 @@ export type UserDoc = {
    * Editable by admin, HR, and project managers (manager role).
    */
   onNoticePeriod: boolean;
+  /** Days the employee must serve, counted from the day notice was started. */
+  noticePeriodDays?: number | null;
+  /** End of the last notice day (IST). After this, the badge is removed and the user is inactive. */
+  noticePeriodEndsAt?: Date | null;
   headOfDepartmentUserIds: number[];
   permissions: string[];
   /** Manual order on the Employees admin list (lower = higher). */
@@ -321,6 +325,8 @@ export type EmployeeDoc = {
   notificationLanguage: string | null;
   employmentType: EmploymentType;
   onNoticePeriod: boolean;
+  noticePeriodDays?: number | null;
+  noticePeriodEndsAt?: Date | null;
   headOfDepartmentUserIds: number[];
   status: UserStatus;
   permissions: string[];

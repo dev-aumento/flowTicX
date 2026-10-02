@@ -13,6 +13,7 @@ import { mountMarketingSession } from "./marketing-routes";
 import { startAutoClockOutScheduler } from "./lib/auto-clock-out";
 import { startHolidayReminderScheduler } from "./lib/holiday-reminders";
 import { startDeadlineReminderScheduler } from "./lib/deadline-reminders";
+import { startNoticePeriodScheduler } from "./lib/notice-period";
 
 const app = new Hono<{ Bindings: HttpBindings }>();
 
@@ -45,6 +46,7 @@ if (hasMongoConfigured()) {
     startAutoClockOutScheduler();
     startHolidayReminderScheduler();
     startDeadlineReminderScheduler();
+    startNoticePeriodScheduler();
   });
 } else {
   console.log("[boot] Running without a database (in-memory store). Register an account to sign in.");
