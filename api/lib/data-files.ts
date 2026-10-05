@@ -10,7 +10,10 @@ export type TabularFile = {
 const WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 
 export function toCsv(table: TabularFile) {
-  const lines = [table.headers, ...table.rows].map((row) => row.map(escapeCsv).join(","));
+  const width = Math.max(table.headers.length, ...table.rows.map((row) => row.length), 0);
+  const lines = [table.headers, ...table.rows].map((row) =>
+    Array.from({ length: width }, (_, index) => escapeCsv(row[index] ?? "")).join(","),
+  );
   return lines.join("\r\n");
 }
 

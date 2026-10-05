@@ -10,6 +10,7 @@ import {
   updateById,
   countDocs,
   hasMongoConfigured,
+  ensureOrgDisplayNumbers,
 } from "./queries/connection";
 import {
   canViewProjectTasks,
@@ -147,6 +148,7 @@ export const projectRouter = createRouter({
       } catch (error) {
         console.error("[projects] Sample projects were not created:", error);
       }
+      await ensureOrgDisplayNumbers(Collections.projects, requireOrganizationId(ctx.user));
       const { status, search, joinedOnly } = input || {};
 
       const filter: Record<string, unknown> = { ...orgFilter(ctx.user) };

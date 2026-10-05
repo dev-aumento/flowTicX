@@ -3694,9 +3694,22 @@ function mockDayEntriesForUser(userId: number, dateStr: string, now = new Date()
   );
   const dayBreaks = mockFindBreaksOverlappingWindow(userId, start, end);
   const breakSeconds = sumBreakSecondsInWindow(dayBreaks, start, end, now);
+  const sortedEntries = [...enrichedEntries].sort(
+    (a, b) => a.clockIn.getTime() - b.clockIn.getTime(),
+  );
+  const stillOpen = sortedEntries.some((entry) => !entry.clockOut);
+  const clockOut = stillOpen
+    ? null
+    : sortedEntries.reduce<Date | null>((latest, entry) => {
+        if (!entry.clockOut) return latest;
+        if (!latest || entry.clockOut.getTime() > latest.getTime()) return entry.clockOut;
+        return latest;
+      }, null);
 
   return {
     entries: enrichedEntries,
+    clockIn: sortedEntries[0]?.clockIn ?? null,
+    clockOut,
     totalMinutes: totalSeconds / 60,
     totalSeconds,
     totalHours: roundHours(totalSeconds / 3600),
@@ -4243,6 +4256,8 @@ export function mockTeamHours(input?: { date?: string; startDate?: string; endDa
       breakHours: day.breakHours,
       breakSeconds: day.breakSeconds,
       entriesCount: day.entriesCount,
+      clockIn: day.clockIn ?? null,
+      clockOut: day.clockOut ?? null,
     };
   });
 }

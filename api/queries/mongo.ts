@@ -122,6 +122,63 @@ export async function nextId(name: CollectionName): Promise<number> {
   });
 }
 
+const ORG_NUMBERED_COLLECTIONS = new Set<CollectionName>([Collections.projects, Collections.tasks]);
+
+type OrgNumberedDoc = {
+  id: number;
+  organizationId?: number | null;
+  number?: number | null;
+  createdAt?: Date;
+};
+
+function orgNumberKey(name: CollectionName, organizationId: number) {
+  return `${name}:org:${organizationId}`;
+}
+
+/** Give existing projects or tasks in one workspace the numbers 1, 2, 3… by creation time. */
+async function ensureOrgNumberCounter(name: CollectionName, organizationId: number) {
+  const col = await getCollection<OrgNumberedDoc>(name);
+  const missing = await col
+    .find({
+      organizationId,
+      $or: [{ number: { $exists: false } }, { number: null }],
+    })
+    .sort({ createdAt: 1, id: 1 })
+    .toArray();
+  const highest = await col
+    .find({ organizationId, number: { $type: "number" } })
+    .sort({ number: -1 })
+    .limit(1)
+    .toArray();
+  let seq = typeof highest[0]?.number === "number" ? highest[0].number : 0;
+  for (const doc of missing) {
+    seq += 1;
+    await col.updateOne({ id: doc.id, organizationId }, { $set: { number: seq } });
+  }
+  if (seq > 0) {
+    const counters = await getCollection<{ _id: string; seq: number }>(Collections.counters);
+    await counters.updateOne({ _id: orgNumberKey(name, organizationId) }, { $max: { seq } }, { upsert: true });
+  }
+}
+
+export async function ensureOrgDisplayNumbers(name: CollectionName, organizationId: number) {
+  if (!ORG_NUMBERED_COLLECTIONS.has(name)) return;
+  await withMongoRetry(() => ensureOrgNumberCounter(name, organizationId));
+}
+
+export async function nextOrgNumber(name: CollectionName, organizationId: number) {
+  return withMongoRetry(async () => {
+    await ensureOrgNumberCounter(name, organizationId);
+    const counters = await getCollection<{ _id: string; seq: number }>(Collections.counters);
+    const result = await counters.findOneAndUpdate(
+      { _id: orgNumberKey(name, organizationId) },
+      { $inc: { seq: 1 } },
+      { upsert: true, returnDocument: "after" },
+    );
+    return result?.seq ?? 1;
+  });
+}
+
 export async function findById<T extends { id: number }>(
   name: CollectionName,
   id: number,
@@ -138,7 +195,12 @@ export async function insertDoc<T extends { id: number }>(
 ): Promise<T> {
   return withMongoRetry(async () => {
     const id = await nextId(name);
-    const full = { ...doc, id } as T;
+    const organizationId = (doc as { organizationId?: number | null }).organizationId;
+    const number =
+      ORG_NUMBERED_COLLECTIONS.has(name) && typeof organizationId === "number"
+        ? await nextOrgNumber(name, organizationId)
+        : undefined;
+    const full = { ...doc, id, ...(number != null ? { number } : {}) } as T;
     const col = await getCollection<T>(name);
     await col.insertOne(full as Document & T);
     return full;

@@ -278,9 +278,23 @@ async function buildDayHoursForUser(userId: number, dateStr: string, now = new D
     0,
   );
   const breakSeconds = sumBreakSecondsInWindow(dayBreaks, start, end, now);
+  const sortedEntries = [...enrichedEntries].sort(
+    (a, b) => new Date(a.clockIn).getTime() - new Date(b.clockIn).getTime(),
+  );
+  const stillOpen = sortedEntries.some((entry) => !entry.clockOut);
+  const clockOut = stillOpen
+    ? null
+    : sortedEntries.reduce<Date | null>((latest, entry) => {
+        if (!entry.clockOut) return latest;
+        const ended = new Date(entry.clockOut);
+        if (!latest || ended.getTime() > latest.getTime()) return ended;
+        return latest;
+      }, null);
 
   return {
     entries: enrichedEntries,
+    clockIn: sortedEntries[0]?.clockIn ?? null,
+    clockOut,
     totalMinutes: totalSeconds / 60,
     totalSeconds,
     totalHours: roundHours(totalSeconds / 3600),
@@ -1309,6 +1323,8 @@ export const timeEntryRouter = createRouter({
             breakHours: day.breakHours,
             breakSeconds: day.breakSeconds,
             entriesCount: day.entriesCount,
+            clockIn: day.clockIn,
+            clockOut: day.clockOut,
           };
         }),
       );

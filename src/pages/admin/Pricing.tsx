@@ -8,6 +8,7 @@ import {
   formatPlanMoney,
   planBillingInterval,
   planIntervalLabel,
+  sortPlansByPrice,
   planPriceForCurrency,
   statusLabel,
   type PlanBillingInterval,
@@ -47,7 +48,8 @@ export default function AdminPricing() {
   }, [activePlan, syncedInterval]);
 
   const visiblePlans = useMemo(
-    () => (plans ?? []).filter((plan) => planBillingInterval(plan) === interval),
+    () =>
+      sortPlansByPrice((plans ?? []).filter((plan) => planBillingInterval(plan) === interval)),
     [plans, interval],
   );
 

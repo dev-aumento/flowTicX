@@ -22,12 +22,13 @@ const DATASETS: { id: Dataset; label: string; columns: string }[] = [
   {
     id: "tasks",
     label: "Tasks",
-    columns: "Title, Description, Project, Status, Priority, Assignee email, Due date, Estimated hours",
+    columns:
+      "Task ID, Created At, Completed At, Last Modified, Name, Section/Column, Assignee, Assignee Email, Start Date, Due Date, Tags, Notes, Projects, Parent task, Blocked By (Dependencies), Blocking (Dependencies), Task Status, Priority",
   },
   {
     id: "hours",
     label: "Task hours",
-    columns: "Project, Task, Total hours",
+    columns: "Project, Task, Total hours (or Clock in and Clock out)",
   },
   {
     id: "clients",
@@ -474,7 +475,7 @@ export default function AdminManageData() {
                   : clientScope === "projects"
                     ? "Each project for the selected client is exported with the combined hours of all its tasks."
                     : "Each project lists its tasks and hours, then a total for that project. Separate time entries on the same task are added together."
-                : "Matching projects and tasks are updated. Task hours export the combined total for each task, so separate time entries on the same task are added together. Dates use ISO format, for example 2026-09-29T09:00:00.000Z. CSV is the most reliable file. PDF and Word imports read the files exported from this page."}
+                : "Task export puts the column names in the first row and one task on each following row. An empty value stays a blank cell. Dates use DD-MM-YYYY. Import creates a missing project or task, updates a match, adds comments separated by |, and sets the hours. Hours can be a total, or a clock-in and clock-out. CSV is the most reliable file. PDF and Word imports read the files exported from this page."}
             </p>
 
             <div className="flex flex-wrap gap-2">

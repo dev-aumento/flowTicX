@@ -343,6 +343,8 @@ export type SafeEmployee = Omit<EmployeeDoc, "passwordHash">;
 
 export type ProjectDoc = {
   id: number;
+  /** Workspace-local display number. Starts at 1 for each organization. */
+  number?: number | null;
   organizationId: number | null;
   name: string;
   description: string | null;
@@ -372,6 +374,8 @@ export type ProjectMemberDoc = {
 
 export type TaskDoc = {
   id: number;
+  /** Workspace-local display number. Starts at 1 for each organization. */
+  number?: number | null;
   organizationId: number | null;
   title: string;
   description: string | null;

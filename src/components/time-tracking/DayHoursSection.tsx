@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { trpc } from "@/providers/trpc";
 import { useAuth } from "@/hooks/useAuth";
 import { UserAvatar } from "@/components/shared/UserAvatar";
-import { Timer, Calendar, Loader2, Pencil, ChevronDown, Coffee } from "lucide-react";
+import { Timer, Calendar, Loader2, Pencil, ChevronDown, Coffee, LogIn, LogOut } from "lucide-react";
 import { localDateKey, REQUIRED_DAILY_HOURS, formatHoursMinutes, formatHoursMinutesFloored } from "@/lib/work-hours-policy";
 import { formatDuration, cn } from "@/lib/utils";
 import { hasPermission } from "@/lib/permissions";
@@ -14,7 +14,7 @@ import {
   formatEntryDateTimeRange,
   type AttendanceEntryRow,
 } from "@/components/time-tracking/EditAttendanceEntryDialog";
-import { formatWorkZoneDateKey } from "@/lib/timezone";
+import { formatWorkZoneDateKey, formatWorkZoneTime } from "@/lib/timezone";
 
 function formatEntryDuration(minutes: number | null | undefined) {
   if (minutes == null) return "—";
@@ -58,15 +58,54 @@ function UtilizationBar({ totalHours }: { totalHours: number }) {
   );
 }
 
+function formatClockTime(value: Date | string | null | undefined) {
+  if (!value) return "—";
+  return formatWorkZoneTime(value, {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
 function TeamHourWorkBreak({
   totalHours,
   breakSeconds,
+  clockIn,
+  clockOut,
 }: {
   totalHours: number;
   breakSeconds: number;
+  clockIn?: Date | string | null;
+  clockOut?: Date | string | null;
 }) {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 rounded-lg border border-gray-200 bg-white p-3">
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 rounded-lg border border-gray-200 bg-white p-3">
+      <div className="flex items-center gap-2.5">
+        <div className="h-8 w-8 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0">
+          <LogIn size={15} />
+        </div>
+        <div>
+          <div className="text-[11px] uppercase tracking-wide text-gray-400 font-medium">
+            Clock in
+          </div>
+          <div className="text-sm font-semibold text-[#1F2937]">
+            {formatClockTime(clockIn)}
+          </div>
+        </div>
+      </div>
+      <div className="flex items-center gap-2.5">
+        <div className="h-8 w-8 rounded-lg bg-rose-50 text-rose-700 flex items-center justify-center shrink-0">
+          <LogOut size={15} />
+        </div>
+        <div>
+          <div className="text-[11px] uppercase tracking-wide text-gray-400 font-medium">
+            Clock out
+          </div>
+          <div className="text-sm font-semibold text-[#1F2937]">
+            {clockIn && !clockOut ? "In progress" : formatClockTime(clockOut)}
+          </div>
+        </div>
+      </div>
       <div className="flex items-center gap-2.5">
         <div className="h-8 w-8 rounded-lg bg-blue-50 text-[#2563EB] flex items-center justify-center shrink-0">
           <Timer size={15} />
@@ -408,6 +447,8 @@ export function DayHoursSection({ embedded = true }: { embedded?: boolean }) {
                           <TeamHourWorkBreak
                             totalHours={member.totalHours}
                             breakSeconds={breakSeconds}
+                            clockIn={member.clockIn}
+                            clockOut={member.clockOut}
                           />
                         </div>
                       ) : null}
@@ -458,11 +499,13 @@ export function DayHoursSection({ embedded = true }: { embedded?: boolean }) {
                           <UtilizationBar totalHours={member.totalHours} />
                         </button>
                         {expanded ? (
-                          <div className="px-5 pb-3 pt-0 bg-gray-50/70">
+                          <div className="px-5 pb-3 pt-3 bg-gray-50/70 dark:bg-[#2c3446]">
                             <div className="ml-8">
                               <TeamHourWorkBreak
                                 totalHours={member.totalHours}
                                 breakSeconds={breakSeconds}
+                                clockIn={member.clockIn}
+                                clockOut={member.clockOut}
                               />
                             </div>
                           </div>

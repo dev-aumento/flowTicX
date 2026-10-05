@@ -143,6 +143,11 @@ export function planIntervalLabel(interval: PlanBillingInterval) {
   return interval === "year" ? "Yearly" : "Monthly";
 }
 
+/** Lowest price first. Same price keeps the earlier plan name. */
+export function sortPlansByPrice<T extends { amount: number; name: string }>(plans: T[]) {
+  return [...plans].sort((a, b) => a.amount - b.amount || a.name.localeCompare(b.name));
+}
+
 export function planChoiceLabel(plan: {
   name: string;
   billingInterval?: string | null;

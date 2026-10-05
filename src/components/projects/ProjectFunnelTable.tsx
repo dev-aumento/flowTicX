@@ -23,6 +23,7 @@ export type ProjectFunnelMember = {
 
 export type ProjectFunnelRow = {
   id: number;
+  number?: number | null;
   name: string;
   color?: string | null;
   icon?: string | null;
@@ -132,7 +133,7 @@ export function ProjectFunnelTable({
                   <td className="px-3 py-3.5" onClick={(e) => e.stopPropagation()}>
                     <input type="checkbox" checked={selectedIds.has(project.id)} onChange={() => onToggleSelect(project.id)} className="h-4 w-4 rounded border-gray-300 text-[#2563EB] focus:ring-[#2563EB]/30" aria-label={`Select ${project.name}`}/>
                   </td>
-                  <td className="px-3 py-3.5 text-sm text-gray-500 tabular-nums">{project.id}</td>
+                  <td className="px-3 py-3.5 text-sm text-gray-500 tabular-nums">{project.number ?? project.id}</td>
                   <td className="px-3 py-3.5">
                     <div className="flex items-center gap-3 min-w-0">
                       <ProjectIcon color={project.color} icon={project.icon} />

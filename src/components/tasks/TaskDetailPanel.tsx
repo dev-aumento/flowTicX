@@ -970,7 +970,7 @@ function TaskPanelContent({
 
   const handleCopyId = async () => {
     try {
-      await navigator.clipboard.writeText(String(task.id));
+      await navigator.clipboard.writeText(String(task.number ?? task.id));
       setIdCopied(true);
       window.setTimeout(() => setIdCopied(false), 2000);
     } catch {
@@ -1289,8 +1289,8 @@ function TaskPanelContent({
     handleSendComment(`📎 Shared CRM file: ${file.fileName}`);
   };
 
-  const handleSelectTaskReference = (pickedTask: { id: number; title: string }) => {
-    handleSendComment(`📋 Linked task #${pickedTask.id}: ${pickedTask.title}`);
+  const handleSelectTaskReference = (pickedTask: { id: number; number?: number | null; title: string }) => {
+    handleSendComment(`📋 Linked task #${pickedTask.number ?? pickedTask.id}: ${pickedTask.title}`);
   };
 
   const handleSelectEvent = (title: string, when: string) => {
@@ -2101,7 +2101,7 @@ function TaskPanelContent({
                       </>
                     ) : null}
                     <span className="text-gray-400"> / </span>
-                    ID: {task.id}
+                    ID: {task.number ?? task.id}
                   </span>
                   <button
                     type="button"

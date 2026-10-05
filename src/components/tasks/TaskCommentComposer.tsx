@@ -40,6 +40,7 @@ import {
 
 type TaskPickerItem = {
   id: number;
+  number?: number | null;
   title: string;
   status?: string | null;
 };
@@ -157,7 +158,7 @@ export function TaskCommentComposer({
     const query = taskSearch.trim().toLowerCase();
     if (!query) return tasks.slice(0, 20);
     return tasks
-      .filter((task) => task.title.toLowerCase().includes(query) || String(task.id).includes(query))
+      .filter((task) => task.title.toLowerCase().includes(query) || String(task.number ?? task.id).includes(query))
       .slice(0, 20);
   }, [taskSearch, tasks]);
 
@@ -530,7 +531,7 @@ export function TaskCommentComposer({
                           className="w-full px-4 py-2.5 text-left hover:bg-gray-50"
                         >
                           <p className="text-sm font-medium text-gray-800 truncate">{task.title}</p>
-                          <p className="text-xs text-gray-500">#{task.id}{task.status ? ` · ${task.status}` : ""}</p>
+                          <p className="text-xs text-gray-500">#{task.number ?? task.id}{task.status ? ` · ${task.status}` : ""}</p>
                         </button>
                       ))
                     )}

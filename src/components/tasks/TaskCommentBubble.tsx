@@ -605,7 +605,7 @@ export function TaskCommentBubble({
                 type="button"
                 onClick={cancelEdit}
                 disabled={isSaving}
-                className="h-8 px-3 rounded-lg text-xs font-medium text-gray-600 hover:bg-white/70 disabled:opacity-50"
+                className="h-8 px-3 rounded-lg text-xs font-medium text-gray-600 hover:bg-white/70 disabled:opacity-50 dark:bg-[#151c2c] dark:text-gray-100 dark:hover:bg-white/10"
               >
                 Cancel
               </button>

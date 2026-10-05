@@ -12,6 +12,7 @@ import {
   updateById,
   countDocs,
   hasMongoConfigured,
+  ensureOrgDisplayNumbers,
 } from "./queries/connection";
 import {
   deleteAttachmentFromGridFs,
@@ -202,6 +203,7 @@ export const taskRouter = createRouter({
       if (useTaskMock()) return mock.mockTaskList(input || undefined, ctx.user);
 
       await ensureSchema();
+      await ensureOrgDisplayNumbers(Collections.tasks, requireOrganizationId(ctx.user));
       const {
         status,
         priority,
@@ -378,6 +380,7 @@ export const taskRouter = createRouter({
       if (useTaskMock()) return mock.mockTaskById(input.id);
 
       await ensureSchema();
+      await ensureOrgDisplayNumbers(Collections.tasks, requireOrganizationId(ctx.user));
       const task = await findById<TaskDoc>(Collections.tasks, input.id);
       if (!task || !(await canViewTask(ctx.user, task))) return null;
 

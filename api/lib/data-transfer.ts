@@ -8,12 +8,24 @@ import type {
   CustomerDoc,
   ProjectDoc,
   ProjectStatus,
+  TaskActivityDoc,
   TaskDoc,
   TaskPriority,
   TaskStatus,
   TimeEntryDoc,
   UserDoc,
 } from "@db/mongo/types";
+import { extractTaskTags } from "@/lib/task-tags";
+import {
+  PROJECT_PIPELINE_STAGES,
+  legacyStatusToStage,
+  pipelineStageLabel,
+  resolveProjectPipelineStages,
+  taskPipelineStage,
+} from "@/lib/task-kanban";
+import { richCommentPlainText } from "@/lib/rich-comment";
+import { workZoneDateParts, workZoneWallTimeToUtc } from "@/lib/timezone";
+import { loadOrgPipelineStageLabels, loadOrgTaskStatusLabels } from "./org-task-status-labels";
 import { getCollection, insertDoc, updateById } from "../queries/connection";
 import { requireOrganizationId } from "./tenant";
 import { hasPermission } from "./permissions";
@@ -30,7 +42,26 @@ const DATASET_FEATURE: Record<DataTransferDataset, string> = {
 };
 
 const PROJECT_HEADERS = ["Name", "Description", "Client", "Status"];
-const TASK_HEADERS = ["Title", "Description", "Project", "Status", "Priority", "Assignee email", "Due date", "Estimated hours"];
+const TASK_HEADERS = [
+  "Task ID",
+  "Created At",
+  "Completed At",
+  "Last Modified",
+  "Name",
+  "Section/Column",
+  "Assignee",
+  "Assignee Email",
+  "Start Date",
+  "Due Date",
+  "Tags",
+  "Notes",
+  "Projects",
+  "Parent task",
+  "Blocked By (Dependencies)",
+  "Blocking (Dependencies)",
+  "Task Status",
+  "Priority",
+];
 const HOUR_TOTAL_HEADERS = ["Project", "Task", "Total hours"];
 const HOUR_SUMMARY_HEADERS = ["Project", "Task", "Time entries", "Total hours"];
 const CLIENT_PROJECT_HEADERS = ["Project name", "Total hours of all tasks"];
@@ -226,6 +257,25 @@ export async function importDataset(
     throw new TRPCError({ code: "BAD_REQUEST", message });
   }
 
+  if (dataset === "tasks") {
+    const missing = missingRequiredHeaders(table.headers, TASK_HEADERS);
+    if (missing.length > 0) {
+      const message = missingHeaderMessage(missing);
+      await writeLog(user, organizationId, {
+        action: "import",
+        dataset,
+        format,
+        fileName,
+        rowCount: table.rows.length,
+        createdCount: 0,
+        updatedCount: 0,
+        skippedCount: table.rows.length,
+        message,
+      });
+      throw new TRPCError({ code: "BAD_REQUEST", message });
+    }
+  }
+
   const result =
     dataset === "projects"
       ? await importProjects(user, organizationId, table)
@@ -364,30 +414,86 @@ async function buildTable(
     };
   }
 
-  if (dataset === "tasks") {
-    const tasks = await getCollection<TaskDoc>(Collections.tasks);
-    const filter = scope.projectId != null ? { organizationId, projectId: scope.projectId } : { organizationId };
-    const docs = await tasks.find(filter).sort({ createdAt: -1 }).toArray();
-    const projectMap = await projectNameMap(organizationId);
-    const userMap = await userEmailMap(organizationId);
-    return {
-      headers: TASK_HEADERS,
-      rows: docs.map((task) => [
-        task.title,
-        task.description ?? "",
-        task.projectId != null ? projectMap.get(task.projectId) ?? "" : "",
-        task.status,
-        task.priority,
-        task.assigneeId != null ? userMap.get(task.assigneeId) ?? "" : "",
-        task.dueDate ? toIso(task.dueDate) : "",
-        task.estimatedHours ?? "",
-      ]),
-    };
-  }
+  if (dataset === "tasks") return buildTaskSheet(organizationId, scope.projectId);
 
   if (dataset === "clients") return buildClientHours(organizationId, scope);
 
   return buildHourTotals(organizationId, scope.projectId, scope.taskId, scope.mode === "totals");
+}
+
+async function buildTaskSheet(organizationId: number, projectId: number | null): Promise<TabularFile> {
+  const tasks = await getCollection<TaskDoc>(Collections.tasks);
+  const filter = projectId != null ? { organizationId, projectId } : { organizationId };
+  const docs = await tasks.find(filter).toArray();
+  docs.sort((left, right) => (left.number ?? left.id) - (right.number ?? right.id));
+
+  const projects = await getCollection<ProjectDoc>(Collections.projects);
+  const projectDocs = await projects.find({ organizationId }).toArray();
+  const projectById = new Map(projectDocs.map((project) => [project.id, project]));
+  const [orgStageLabels, statusLabels] = await Promise.all([
+    loadOrgPipelineStageLabels(organizationId),
+    loadOrgTaskStatusLabels(organizationId),
+  ]);
+  const stagesByProject = new Map<number, ReturnType<typeof resolveProjectPipelineStages>>();
+  const stagesFor = (taskProjectId: number | null) => {
+    if (taskProjectId == null) return resolveProjectPipelineStages(null, orgStageLabels);
+    const cached = stagesByProject.get(taskProjectId);
+    if (cached) return cached;
+    const resolved = resolveProjectPipelineStages(projectById.get(taskProjectId), orgStageLabels);
+    stagesByProject.set(taskProjectId, resolved);
+    return resolved;
+  };
+
+  const users = await getCollection<UserDoc>(Collections.users);
+  const people = await users.find({ organizationId }).project({ id: 1, name: 1, email: 1 }).toArray();
+  const personById = new Map(people.map((person) => [person.id, person]));
+
+  const taskIds = docs.map((task) => task.id);
+  const activities = await getCollection<TaskActivityDoc>(Collections.taskActivity);
+  const completedAt = new Map<number, Date>();
+  if (taskIds.length > 0) {
+    const events = await activities
+      .find({ taskId: { $in: taskIds }, action: "status_changed", newValue: "done" })
+      .sort({ createdAt: 1 })
+      .toArray();
+    for (const event of events) {
+      completedAt.set(event.taskId, event.createdAt);
+    }
+  }
+
+  const rows = docs.map((task) => {
+    const person = task.assigneeId != null ? personById.get(task.assigneeId) : undefined;
+    const project = task.projectId != null ? projectById.get(task.projectId) : undefined;
+    const finished = task.status === "done";
+    const completed = finished ? completedAt.get(task.id) ?? task.updatedAt : null;
+    const notes = sheetCell(richCommentPlainText(task.description ?? ""));
+    const tags = extractTaskTags(task).join(", ");
+    const statusKey = task.status;
+    const statusLabel =
+      statusKey in statusLabels ? statusLabels[statusKey as keyof typeof statusLabels] : task.status;
+    return [
+      String(task.number ?? task.id),
+      formatSheetDateTime(task.createdAt),
+      formatSheetDate(completed),
+      formatSheetDateTime(task.updatedAt),
+      sheetCell(task.title),
+      sheetCell(pipelineStageLabel(taskPipelineStage(task), stagesFor(task.projectId))),
+      sheetCell(person?.name ?? ""),
+      sheetCell(person?.email ?? ""),
+      "",
+      formatSheetDate(task.dueDate),
+      sheetCell(tags),
+      notes,
+      sheetCell(project?.name ?? ""),
+      "",
+      "",
+      "",
+      sheetCell(statusLabel),
+      sheetCell(priorityLabel(task.priority)),
+    ];
+  });
+
+  return { headers: TASK_HEADERS, rows };
 }
 
 async function buildHourTotals(
@@ -664,6 +770,41 @@ function exportMessage(
   return `Exported ${rowCount} ${what}${where} as ${formatLabel(format)}.`;
 }
 
+async function ensureImportedProject(
+  user: Actor,
+  organizationId: number,
+  projectDocs: ProjectDoc[],
+  name: string,
+  notes: string[],
+) {
+  const found = projectDocs.find((project) => project.name.trim().toLowerCase() === name.toLowerCase());
+  if (found) return found;
+  try {
+    await assertCanAddProject(organizationId, user.id);
+  } catch (error) {
+    notes.push(error instanceof Error ? error.message : "Project limit reached.");
+    return null;
+  }
+  const now = new Date();
+  const created = await insertDoc<ProjectDoc>(Collections.projects, {
+    organizationId,
+    name,
+    description: null,
+    clientName: null,
+    status: "active",
+    color: null,
+    icon: null,
+    createdBy: user.id,
+    createdAt: now,
+    updatedAt: now,
+  });
+  await joinProject(created.id, user.id);
+  projectDocs.push(created);
+  notes.push(`Created project "${name}".`);
+  await notifyIfProjectLimitReached(organizationId, user.id);
+  return created;
+}
+
 async function importProjects(user: Actor, organizationId: number, table: TabularFile) {
   const index = headerIndex(table.headers);
   const projects = await getCollection<ProjectDoc>(Collections.projects);
@@ -739,47 +880,60 @@ async function importTasks(user: Actor, organizationId: number, table: TabularFi
   const now = new Date();
 
   for (const row of table.rows) {
-    const title = cell(row, index, ["title", "task", "tasktitle", "name"]);
+    const title = cell(row, index, ["name", "title", "task", "tasktitle"]);
     if (!title) {
       skippedCount += 1;
       continue;
     }
-    const projectName = cell(row, index, ["project", "projectname"]);
+    const projectName = cell(row, index, ["projects", "project", "projectname"]);
     const project = projectName
-      ? projectDocs.find((item) => item.name.trim().toLowerCase() === projectName.toLowerCase())
+      ? await ensureImportedProject(user, organizationId, projectDocs, projectName, notes)
       : undefined;
     if (projectName && !project) {
       skippedCount += 1;
-      notes.push(`Project "${projectName}" was not found.`);
       continue;
     }
-    const assigneeEmail = cell(row, index, ["assigneeemail", "assignee", "email", "employeeemail"]).toLowerCase();
+    const assigneeEmail = cell(row, index, ["assigneeemail", "email", "employeeemail"]).toLowerCase();
+    const assigneeName = cell(row, index, ["assigneename", "assignee"]);
     const assignee = assigneeEmail
       ? people.find((person) => (person.email ?? "").toLowerCase() === assigneeEmail)
-      : undefined;
-    if (assigneeEmail && !assignee) {
-      notes.push(`No teammate uses ${assigneeEmail}.`);
+      : assigneeName
+        ? people.find((person) => (person.name ?? "").trim().toLowerCase() === assigneeName.toLowerCase())
+        : undefined;
+    if ((assigneeEmail || assigneeName) && !assignee) {
+      notes.push(assigneeEmail ? `No teammate uses ${assigneeEmail}.` : `No teammate is named ${assigneeName}.`);
     }
-    const description = cell(row, index, ["description", "details"]) || null;
-    const status = normalizeTaskStatus(cell(row, index, ["status"]));
-    const priority = normalizePriority(cell(row, index, ["priority"]));
-    const dueDate = parseDate(cell(row, index, ["duedate", "due"]));
-    const estimatedHours = cell(row, index, ["estimatedhours", "estimate"]) || null;
+    const notesCell = cell(row, index, ["notes", "description", "details"]);
+    const statusCell = cell(row, index, ["taskstatus", "status"]);
+    const priorityCell = cell(row, index, ["priority"]);
+    const dueCell = cell(row, index, ["duedate", "due"]);
+    const estimatedCell = cell(row, index, ["estimatedhours", "estimate"]);
+    const comments = cell(row, index, ["comments", "comment"]);
+    const sectionCell = cell(row, index, ["sectioncolumn", "section", "column", "stage"]);
     const projectId = project?.id ?? null;
     const match = existing.find(
       (task) =>
         task.title.trim().toLowerCase() === title.toLowerCase() && (task.projectId ?? null) === projectId,
     );
+    const status = statusCell ? normalizeTaskStatus(statusCell) : (match?.status ?? "todo");
+    const priority = priorityCell ? normalizePriority(priorityCell) : (match?.priority ?? "medium");
+    const dueDate = dueCell ? parseDate(dueCell) : (match?.dueDate ?? null);
+    const estimatedHours = estimatedCell || match?.estimatedHours || null;
+    const description = notesCell || match?.description || null;
+    const stage = stageKeyFromLabel(sectionCell) ?? stageForImportedStatus(status, match?.stage);
     if (match) {
       await updateById<TaskDoc>(Collections.tasks, match.id, {
         description,
         status,
+        stage,
         priority,
         assigneeId: assignee?.id ?? match.assigneeId,
         dueDate,
         estimatedHours,
         updatedAt: now,
       });
+      match.stage = stage;
+      await addImportedComments(match.id, user.id, comments, now);
       updatedCount += 1;
       continue;
     }
@@ -788,7 +942,7 @@ async function importTasks(user: Actor, organizationId: number, table: TabularFi
       title,
       description,
       status,
-      stage: "new",
+      stage,
       priority,
       assigneeId: assignee?.id ?? null,
       projectId,
@@ -800,6 +954,7 @@ async function importTasks(user: Actor, organizationId: number, table: TabularFi
       createdAt: now,
       updatedAt: now,
     });
+    await addImportedComments(created.id, user.id, comments, now);
     existing.push(created);
     createdCount += 1;
   }
@@ -814,28 +969,24 @@ async function importHours(user: Actor, organizationId: number, table: TabularFi
   const projectDocs = await projects.find({ organizationId }).toArray();
   const users = await getCollection<UserDoc>(Collections.users);
   const people = await users.find({ organizationId }).toArray();
+  const entries = await getCollection<TimeEntryDoc>(Collections.timeEntries);
+  const entryDocs = (await entries.find({ organizationId, taskId: { $ne: null } }).toArray()) as TimeEntryDoc[];
   let createdCount = 0;
   let updatedCount = 0;
   let skippedCount = 0;
   const notes: string[] = [];
   const now = new Date();
+  let hoursCursor = now.getTime();
 
   for (const row of table.rows) {
     const taskTitle = cell(row, index, ["task", "tasktitle", "title"]);
     const projectName = cell(row, index, ["project", "projectname"]);
-    const project = projectName
-      ? projectDocs.find((item) => item.name.trim().toLowerCase() === projectName.toLowerCase())
-      : undefined;
-    const task = taskDocs.find((item) => {
-      if (item.title.trim().toLowerCase() !== taskTitle.toLowerCase()) return false;
-      if (project && item.projectId !== project.id) return false;
-      return true;
-    });
-    if (!taskTitle || !task) {
+    const clockInText = cell(row, index, ["clockin", "start", "startedat"]);
+    if (!taskTitle) {
       skippedCount += 1;
-      if (taskTitle) notes.push(`Task "${taskTitle}" was not found.`);
       continue;
     }
+    if (taskTitle.toLowerCase() === "total" && !clockInText) continue;
     const email = cell(row, index, ["employeeemail", "useremail", "assigneeemail", "email"]).toLowerCase();
     const person = email
       ? people.find((item) => (item.email ?? "").toLowerCase() === email)
@@ -845,40 +996,86 @@ async function importHours(user: Actor, organizationId: number, table: TabularFi
       notes.push(email ? `No teammate uses ${email}.` : "Employee email is required.");
       continue;
     }
-    const clockIn = parseDate(cell(row, index, ["clockin", "start", "startedat"]));
+    const clockIn = parseDate(clockInText);
     const clockOut = parseDate(cell(row, index, ["clockout", "end", "endedat"]));
-    const hours = Number(cell(row, index, ["hours", "totalhours", "duration", "durationhours"]));
-    let start = clockIn;
-    let end = clockOut;
-    if (!start && Number.isFinite(hours) && hours > 0) {
-      end = end ?? now;
-      start = new Date(end.getTime() - hours * 3600 * 1000);
-    }
-    if (!start || !end) {
-      skippedCount += 1;
-      notes.push("Each hours row needs a clock-in and clock-out, or an hours value.");
-      continue;
-    }
-    if (end.getTime() < start.getTime()) {
+    const hours = parseHoursAmount(cell(row, index, ["hours", "totalhours", "duration", "durationhours"]));
+    const note = cell(row, index, ["note", "notes"]);
+    if (clockIn && clockOut && clockOut.getTime() < clockIn.getTime()) {
       skippedCount += 1;
       notes.push("Clock-out is earlier than clock-in.");
       continue;
     }
-    const durationSeconds = Math.max(0, Math.floor((end.getTime() - start.getTime()) / 1000));
-    await insertDoc<TimeEntryDoc>(Collections.timeEntries, {
-      organizationId,
-      userId: person.id,
-      taskId: task.id,
-      projectId: task.projectId ?? project?.id ?? null,
-      clockIn: start,
-      clockOut: end,
-      duration: Math.floor(durationSeconds / 60),
-      durationSeconds,
-      note: cell(row, index, ["note", "notes"]) || "Imported hours",
-      source: "manual",
-      createdAt: now,
-      updatedAt: now,
+    const hasClock = Boolean(clockIn && clockOut);
+    if (!hasClock && Number.isFinite(hours) && hours <= 0) continue;
+    if (!hasClock && !Number.isFinite(hours)) {
+      skippedCount += 1;
+      notes.push("Each hours row needs a clock-in and clock-out, or an hours value.");
+      continue;
+    }
+    const project = projectName
+      ? await ensureImportedProject(user, organizationId, projectDocs, projectName, notes)
+      : undefined;
+    if (projectName && !project) {
+      skippedCount += 1;
+      continue;
+    }
+    let task = taskDocs.find((item) => {
+      if (item.title.trim().toLowerCase() !== taskTitle.toLowerCase()) return false;
+      if (project && item.projectId !== project.id) return false;
+      if (!project && projectName) return false;
+      return true;
     });
+    if (!task) {
+      task = await insertDoc<TaskDoc>(Collections.tasks, {
+        organizationId,
+        title: taskTitle,
+        description: null,
+        status: "todo",
+        stage: "new",
+        priority: "medium",
+        assigneeId: person.id,
+        projectId: project?.id ?? null,
+        createdBy: user.id,
+        dueDate: null,
+        estimatedHours: null,
+        actualHours: null,
+        position: 0,
+        createdAt: now,
+        updatedAt: now,
+      });
+      taskDocs.push(task);
+      notes.push(`Created task "${taskTitle}".`);
+    }
+    const taskEntries = entryDocs.filter((entry) => entry.taskId === task.id);
+    if (hasClock && clockIn && clockOut) {
+      const duplicate = taskEntries.some(
+        (entry) =>
+          entry.userId === person.id &&
+          entry.clockOut &&
+          Math.abs(new Date(entry.clockIn).getTime() - clockIn.getTime()) < 60_000 &&
+          Math.abs(new Date(entry.clockOut).getTime() - clockOut.getTime()) < 60_000,
+      );
+      if (duplicate) {
+        updatedCount += 1;
+        continue;
+      }
+      const saved = await insertImportedTime(organizationId, person.id, task, clockIn, clockOut, note, now);
+      entryDocs.push(saved);
+      createdCount += 1;
+      continue;
+    }
+    const wantedSeconds = Math.round(hours * 3600);
+    const existingSeconds = taskEntries.reduce((sum, entry) => sum + entrySeconds(entry), 0);
+    if (existingSeconds >= wantedSeconds - 1) {
+      updatedCount += 1;
+      continue;
+    }
+    const gapSeconds = wantedSeconds - existingSeconds;
+    const end = new Date(hoursCursor);
+    const start = new Date(end.getTime() - gapSeconds * 1000);
+    hoursCursor = start.getTime();
+    const saved = await insertImportedTime(organizationId, person.id, task, start, end, note, now);
+    entryDocs.push(saved);
     createdCount += 1;
   }
   return { createdCount, updatedCount, skippedCount, notes: uniqueNotes(notes) };
@@ -937,6 +1134,17 @@ async function writeLog(
   });
 }
 
+function missingRequiredHeaders(headers: string[], required: string[]) {
+  const present = new Set(headers.map((header) => normalizeHeader(header)));
+  return required.filter((header) => !present.has(normalizeHeader(header)));
+}
+
+function missingHeaderMessage(missing: string[]) {
+  const names = missing.join(", ");
+  if (missing.length === 1) return `Missing field "${names}"`;
+  return `Missing fields "${names}"`;
+}
+
 function headerIndex(headers: string[]) {
   const map = new Map<string, number>();
   headers.forEach((header, index) => {
@@ -972,7 +1180,51 @@ function normalizeTaskStatus(value: string): TaskStatus {
   if (TASK_STATUSES.has(key as TaskStatus)) return key as TaskStatus;
   if (key === "inprogress" || key === "doing" || key === "progress") return "in_progress";
   if (key === "finished" || key === "complete" || key === "completed") return "done";
+  if (key === "pause" || key === "paused" || key === "on_hold") return "review";
+  if (key === "not_started" || key === "notstarted") return "todo";
   return "todo";
+}
+
+function stageKeyFromLabel(value: string) {
+  const text = value.trim().toLowerCase();
+  if (!text) return null;
+  const match = PROJECT_PIPELINE_STAGES.find(
+    (stage) => stage.label.toLowerCase() === text || stage.key === text.replace(/[\s/-]+/g, "_"),
+  );
+  return match?.key ?? null;
+}
+
+function sheetCell(value: string) {
+  return value.replace(/\r?\n+/g, " ").replace(/[ \t]{2,}/g, " ").trim();
+}
+
+function formatSheetDate(value: Date | string | null | undefined) {
+  if (!value) return "";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const parts = workZoneDateParts(date);
+  return `${padSheet(parts.day)}-${padSheet(parts.month)}-${parts.year}`;
+}
+
+function formatSheetDateTime(value: Date | string | null | undefined) {
+  if (!value) return "";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const parts = workZoneDateParts(date);
+  return `${padSheet(parts.day)}-${padSheet(parts.month)}-${parts.year} ${padSheet(parts.hour)}:${padSheet(parts.minute)}:${padSheet(parts.second)}`;
+}
+
+function padSheet(value: number) {
+  return String(value).padStart(2, "0");
+}
+
+function priorityLabel(value: string) {
+  const key = value.trim().toLowerCase();
+  if (key === "low") return "Low";
+  if (key === "medium") return "Medium";
+  if (key === "high") return "High";
+  if (key === "urgent") return "Urgent";
+  return value.trim();
 }
 
 function normalizePriority(value: string): TaskPriority {
@@ -981,18 +1233,88 @@ function normalizePriority(value: string): TaskPriority {
   return "medium";
 }
 
+async function addImportedComments(taskId: number, userId: number, raw: string, now: Date) {
+  const lines = raw
+    .split(/\r?\n|\s+\|\s+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length === 0) return;
+  const activities = await getCollection<TaskActivityDoc>(Collections.taskActivity);
+  const existing = await activities.find({ taskId, action: "commented" }).toArray();
+  const have = new Set(
+    existing.map((item) => richCommentPlainText(item.newValue ?? "").trim().toLowerCase()).filter(Boolean),
+  );
+  for (const line of lines) {
+    const key = line.toLowerCase();
+    if (have.has(key)) continue;
+    await insertDoc<TaskActivityDoc>(Collections.taskActivity, {
+      taskId,
+      userId,
+      action: "commented",
+      oldValue: null,
+      newValue: line,
+      metadata: null,
+      createdAt: now,
+    });
+    have.add(key);
+  }
+}
+
+function stageForImportedStatus(status: TaskStatus, current?: string | null) {
+  if (status === "todo" && current && current !== "new") return current;
+  return legacyStatusToStage(status);
+}
+
+function parseHoursAmount(value: string) {
+  const match = value.replace(/,/g, "").match(/(\d+(?:\.\d+)?)/);
+  if (!match) return Number.NaN;
+  return Number(match[1]);
+}
+
+async function insertImportedTime(
+  organizationId: number,
+  userId: number,
+  task: TaskDoc,
+  start: Date,
+  end: Date,
+  note: string,
+  now: Date,
+) {
+  const durationSeconds = Math.max(0, Math.floor((end.getTime() - start.getTime()) / 1000));
+  return insertDoc<TimeEntryDoc>(Collections.timeEntries, {
+    organizationId,
+    userId,
+    taskId: task.id,
+    projectId: task.projectId ?? null,
+    clockIn: start,
+    clockOut: end,
+    duration: Math.floor(durationSeconds / 60),
+    durationSeconds,
+    note: note || "Imported hours",
+    source: "manual",
+    createdAt: now,
+    updatedAt: now,
+  });
+}
+
 function parseDate(value: string) {
   const text = value.trim();
   if (!text) return null;
+  const local = text.match(/^(\d{1,2})-(\d{1,2})-(\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (local) {
+    return workZoneWallTimeToUtc(
+      Number(local[3]),
+      Number(local[2]),
+      Number(local[1]),
+      Number(local[4] ?? 12),
+      Number(local[5] ?? 0),
+      Number(local[6] ?? 0),
+      0,
+    );
+  }
   const parsed = new Date(text);
   if (Number.isNaN(parsed.getTime())) return null;
   return parsed;
-}
-
-function toIso(value: Date | string) {
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toISOString();
 }
 
 function uniqueNotes(notes: string[]) {
@@ -1050,8 +1372,3 @@ async function taskTitleMap(organizationId: number) {
   return new Map(docs.map((task) => [task.id, task.title]));
 }
 
-async function userEmailMap(organizationId: number) {
-  const users = await getCollection<UserDoc>(Collections.users);
-  const docs = await users.find({ organizationId }).project({ id: 1, email: 1 }).toArray();
-  return new Map(docs.map((user) => [user.id, user.email ?? ""]));
-}

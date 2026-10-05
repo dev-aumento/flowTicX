@@ -7,6 +7,7 @@ import { PLAN_HIGHLIGHTS } from "@/lib/plan-entitlements";
 import {
   planBillingInterval,
   planIntervalLabel,
+  sortPlansByPrice,
   type PlanBillingInterval,
 } from "@/lib/platform-admin";
 import { Input } from "@/components/ui/input";
@@ -105,7 +106,8 @@ export default function PlatformPlans() {
   }, [overview]);
 
   const visiblePlans = useMemo(
-    () => (plans ?? []).filter((plan) => planBillingInterval(plan) === interval),
+    () =>
+      sortPlansByPrice((plans ?? []).filter((plan) => planBillingInterval(plan) === interval)),
     [plans, interval],
   );
 
