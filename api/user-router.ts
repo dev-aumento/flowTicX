@@ -26,6 +26,7 @@ import { canManageNoticePeriod, isTaskAssignableUser } from "@/lib/leave-policy"
 import { expireFinishedNoticePeriods } from "./lib/notice-period";
 import { isInvitedStaffClient } from "./lib/client-projects";
 import { assignedEmployeeIdsOf } from "./lib/client-visibility";
+import { removeSampleEmployeeWork } from "./lib/sample-workspace";
 
 function canFullyEditEmployees(
   user: { role?: string | null; permissions?: string[] | null; department?: string | null },
@@ -197,6 +198,7 @@ export const userRouter = createRouter({
             updatedAt: new Date(),
           });
           invalidateAuthUserCache(user.id);
+          if (user.sampleEmployee) await removeSampleEmployeeWork(user.id);
         }
       }
 
@@ -455,6 +457,14 @@ export const userRouter = createRouter({
           await deactivateEmployeeByUserId(updated.id);
         }
       }
+      if (
+        existing.sampleEmployee &&
+        String(existing.status).toLowerCase() === "active" &&
+        updated &&
+        String(updated.status).toLowerCase() !== "active"
+      ) {
+        await removeSampleEmployeeWork(updated.id);
+      }
       return updated ? omitPasswordHash(updated) : null;
     }),
 
@@ -565,6 +575,7 @@ export const userRouter = createRouter({
         return mock.mockAdminUpdateUser({ id: input.id, status: "inactive" });
       }
 
+      await removeSampleEmployeeWork(input.id);
       await deleteEmployeeByUserId(input.id);
       const updated = await updateById<UserDoc>(Collections.users, input.id, {
         status: "inactive",

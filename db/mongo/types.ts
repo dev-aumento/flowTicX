@@ -168,6 +168,14 @@ export type OrganizationDoc = {
   logoDataUrl?: string | null;
   /** Set after the one-time sample projects and tasks are created for a new workspace. */
   sampleWorkspaceSeededAt?: Date | null;
+  /**
+   * Set after the one-time sample-employee pass.
+   * A still-empty workspace gets starter employees and tracked hours.
+   * A workspace that already has a team is left alone.
+   */
+  sampleEmployeesSeededAt?: Date | null;
+  /** Set while starter employees are being created, so a second request does not add them twice. */
+  sampleEmployeesSeedingAt?: Date | null;
   createdBy: number | null;
   createdAt: Date;
   updatedAt: Date;
@@ -255,6 +263,11 @@ export type UserDoc = {
   /** Manual order on the Employees admin list (lower = higher). */
   sortOrder?: number;
   /**
+   * Starter employee created so a new workspace dashboard is not empty.
+   * Deactivating or removing them also deletes the hours they tracked.
+   */
+  sampleEmployee?: boolean | null;
+  /**
    * Invited client portal: show task time tracking only when true.
    * Defaults to hidden when unset.
    */
@@ -269,6 +282,13 @@ export type UserDoc = {
    * Empty/unset means no employees are offered.
    */
   assignedEmployeeIds?: number[];
+  /**
+   * Invited client only. Cancelling this person does not change the workspace plan.
+   * Unset means they still follow the workspace subscription.
+   */
+  clientPlanStatus?: "active" | "cancelled" | null;
+  clientPlanCancelledAt?: Date | null;
+  clientPlanCancelReason?: string | null;
   createdAt: Date;
   updatedAt: Date;
   lastSignInAt: Date;

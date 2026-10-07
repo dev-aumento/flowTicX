@@ -759,7 +759,27 @@ export const authRouter = createRouter({
 
       await ensureSchema();
 
-      const patch = buildPersonalInfoUserPatch(sanitized, ctx.user);
+      const canChangeOwnEmail = hasPermission(ctx.user, "employees.manage");
+      if (canChangeOwnEmail && sanitized.email) {
+        const normalized = sanitized.email.trim().toLowerCase();
+        const matches = await findUsersByEmail(normalized);
+        const taken = matches.some(
+          (user) =>
+            user.id !== ctx.user.id &&
+            (ctx.user.organizationId == null || user.organizationId === ctx.user.organizationId),
+        );
+        if (taken) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "Another account in this workspace already uses this email.",
+          });
+        }
+        sanitized.email = normalized;
+      }
+
+      const patch = buildPersonalInfoUserPatch(sanitized, ctx.user, {
+        allowEmailChange: canChangeOwnEmail,
+      });
 
       const updated = await updateById<UserDoc>(Collections.users, ctx.user.id, patch);
       if (!updated) {

@@ -127,6 +127,12 @@ function isActiveUser(status: string | null | undefined) {
   return String(status ?? "").toLowerCase() === "active";
 }
 
+/** Clients only receive the assignment email. Other activity mail stays with staff. */
+function receivesTaskEmail(role: string | null | undefined, kind: TaskEmailKind) {
+  if (String(role ?? "").toLowerCase() !== "client") return true;
+  return kind === "assign";
+}
+
 function labelize(value: string) {
   return value
     .replace(/_/g, " ")
@@ -318,10 +324,13 @@ export async function sendTaskNotificationEmails(input: {
   const usersCol = await getCollection<UserDoc>(Collections.users);
   const users = await usersCol
     .find({ id: { $in: input.userIds } })
-    .project({ id: 1, email: 1, name: 1, status: 1 })
+    .project({ id: 1, email: 1, name: 1, status: 1, role: 1 })
     .toArray();
   const recipients = users.filter(
-    (user) => isActiveUser(user.status) && Boolean(user.email?.trim()),
+    (user) =>
+      isActiveUser(user.status) &&
+      Boolean(user.email?.trim()) &&
+      receivesTaskEmail(user.role, input.kind),
   );
   if (recipients.length === 0) return;
 

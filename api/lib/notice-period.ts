@@ -3,6 +3,7 @@ import type { UserDoc } from "@db/mongo/types";
 import { getCollection, updateById } from "../queries/connection";
 import { syncEmployeeFromUser } from "../queries/employees";
 import { invalidateAuthUserCache } from "./auth";
+import { removeSampleEmployeeWork } from "./sample-workspace";
 
 /**
  * Notice that has reached its end date is cleared, and the person is marked inactive.
@@ -31,6 +32,7 @@ export async function expireFinishedNoticePeriods(organizationId?: number | null
     if (!updated) continue;
     invalidateAuthUserCache(user.id);
     await syncEmployeeFromUser(updated);
+    if (user.sampleEmployee) await removeSampleEmployeeWork(user.id);
   }
   return due.length;
 }

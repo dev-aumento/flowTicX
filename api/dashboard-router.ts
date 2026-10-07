@@ -49,6 +49,7 @@ import {
   type CalendarYmd,
 } from "@/lib/timezone";
 import { invoiceBalanceDue, invoiceTotal, isInvoiceOutstanding, normalizeCurrencyCode } from "@/lib/invoice-store";
+import { ensureSampleEmployeesOnce } from "./lib/sample-workspace";
 
 function roundHours(minutes: number) {
   return Math.round((minutes / 60) * 10) / 10;
@@ -727,6 +728,11 @@ export const dashboardRouter = createRouter({
 
     await ensureSchema();
     const tenant = orgFilter(ctx.user);
+    try {
+      await ensureSampleEmployeesOnce(tenant.organizationId);
+    } catch (error) {
+      console.error("[dashboard] Sample employees were not created:", error);
+    }
     const userCol = await getCollection<UserDoc>(Collections.users);
     const sessionCol = await getCollection<WorkSessionDoc>(Collections.workSessions);
     const leaveCol = await getCollection<LeaveRequestDoc>(Collections.leaveRequests);

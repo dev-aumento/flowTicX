@@ -98,6 +98,12 @@ export default function AdminEmployees({
 
   const utils = trpc.useUtils();
 
+  const liveUsers = useMemo(() => {
+    const map = new Map<number, EmployeeRow>();
+    for (const user of (data?.users ?? []) as EmployeeRow[]) map.set(user.id, user);
+    return map;
+  }, [data?.users]);
+
   useEffect(() => {
     setOrderedUsers((data?.users ?? []) as EmployeeRow[]);
   }, [data?.users]);
@@ -118,6 +124,9 @@ export default function AdminEmployees({
   const updateStatusMutation = trpc.user.update.useMutation({
     onSuccess: () => {
       utils.user.list.invalidate();
+      void utils.dashboard.getHrDashboard.invalidate();
+      void utils.timeEntry.getTeamHours.invalidate();
+      void utils.timeEntry.getDayHours.invalidate();
     },
   });
 
@@ -406,7 +415,9 @@ export default function AdminEmployees({
           )}
 
           <div>
-            {orderedUsers.map((u) => (
+            {orderedUsers.map((row) => {
+              const u = liveUsers.get(row.id) ?? row;
+              return (
               <div
                 key={u.id}
                 draggable={canReorder}
@@ -624,7 +635,8 @@ export default function AdminEmployees({
                   )}
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
 
           {orderedUsers.length === 0 && !isLoading && (

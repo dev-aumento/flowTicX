@@ -121,7 +121,7 @@ export default function PlatformOverview() {
                 <Link
                   key={row.id}
                   to={`/platform/clients/${row.id}`}
-                  className="flex w-full min-w-0 items-start gap-3 rounded-xl py-3.5 hover:bg-[#F8FAFC] sm:items-center dark:hover:bg-white/5"
+                  className="flex w-full min-w-0 items-start gap-3 rounded-xl py-3.5 px-3.5 hover:bg-[#F8FAFC] sm:items-center dark:hover:bg-white/5"
                 >
                   <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#EEF4FF] text-sm font-bold text-[#2563EB]">
                     {initials(row.ownerName)}

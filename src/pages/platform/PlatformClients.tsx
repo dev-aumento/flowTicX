@@ -119,7 +119,7 @@ function StatusBadge({ status }: { status: string }) {
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide",
+        "inline-flex items-center whitespace-nowrap rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide",
         paid && "bg-emerald-50 text-emerald-700",
         unpaid && "bg-red-50 text-red-600",
         status === "cancelled" && "bg-gray-100 text-gray-600",
@@ -244,7 +244,7 @@ export default function PlatformClients() {
             </p>
           ) : (
             <div className="min-w-0">
-              <div className="hidden items-center gap-3 border-b border-[#EEF0F3] px-5 py-3 lg:grid lg:grid-cols-[minmax(0,1.4fr)_minmax(0,168px)_minmax(0,168px)_minmax(0,140px)_44px] dark:border-[#1E293B]">
+              <div className="hidden items-center gap-3 border-b border-[#EEF0F3] px-5 py-3 lg:grid lg:grid-cols-[minmax(0,1.4fr)_minmax(0,168px)_minmax(0,168px)_minmax(7.5rem,9.5rem)_44px] dark:border-[#1E293B]">
                 <p className="text-[11px] font-semibold tracking-[0.08em] text-[#9CA3AF] uppercase">
                   Client
                 </p>
@@ -272,7 +272,7 @@ export default function PlatformClients() {
                   return (
                     <div
                       key={row.id}
-                      className="grid min-w-0 grid-cols-1 gap-3 px-4 py-3 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,168px)_minmax(0,168px)_minmax(0,140px)_44px] lg:items-center lg:gap-3 lg:px-5 lg:py-4"
+                      className="grid min-w-0 grid-cols-1 gap-3 px-4 py-3 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,168px)_minmax(0,168px)_minmax(7.5rem,9.5rem)_44px] lg:items-start lg:gap-3 lg:px-5 lg:py-4"
                     >
                       <div className="flex min-w-0 items-center gap-2">
                         <button
@@ -292,8 +292,13 @@ export default function PlatformClients() {
                             <p className="truncate text-xs text-[#6B7280]">
                               {rowPlanLabel} · {row.introEnterprise ? "Complimentary" : formatInr(row.subscriptionAmount)}
                             </p>
+                            <div className="mt-1.5 flex flex-col items-start gap-1">
+                              <p className="whitespace-nowrap text-[11px] leading-4 text-[#6B7280]">
+                                {formatPurchaseDate(row.purchasedAt)}
+                              </p>
+                              <StatusBadge status={row.planStatus} />
+                            </div>
                           </div>
-                          <StatusBadge status={row.planStatus} />
                           <ChevronDown
                             size={16}
                             className={cn(
@@ -369,12 +374,14 @@ export default function PlatformClients() {
                         <p className="mb-1 text-[11px] font-semibold tracking-[0.08em] text-[#9CA3AF] uppercase lg:hidden">
                           Amount
                         </p>
-                        <p className="text-sm font-semibold lg:text-right">
-                          {row.introEnterprise ? "Complimentary" : formatInr(row.subscriptionAmount)}
-                        </p>
-                        <div className="mt-1 flex items-center justify-between gap-2 lg:justify-end">
-                          <p className="text-[11px] text-[#6B7280]">{formatPurchaseDate(row.purchasedAt)}</p>
-                          <span className="hidden lg:inline">
+                        <div className="flex flex-col items-start gap-1 lg:items-end">
+                          <p className="whitespace-nowrap text-sm font-semibold">
+                            {row.introEnterprise ? "Complimentary" : formatInr(row.subscriptionAmount)}
+                          </p>
+                          <p className="hidden whitespace-nowrap text-[11px] leading-4 text-[#6B7280] lg:block">
+                            {formatPurchaseDate(row.purchasedAt)}
+                          </p>
+                          <span className="hidden lg:inline-flex">
                             <StatusBadge status={row.planStatus} />
                           </span>
                         </div>
@@ -457,9 +464,11 @@ export default function PlatformClients() {
                       <span
                         className={cn(
                           "inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide",
-                          row.status === "active"
-                            ? "bg-emerald-50 text-emerald-700"
-                            : "bg-gray-100 text-gray-600",
+                          row.status === "cancelled"
+                            ? "bg-red-50 text-red-700"
+                            : row.status === "active"
+                              ? "bg-emerald-50 text-emerald-700"
+                              : "bg-gray-100 text-gray-600",
                         )}
                       >
                         {row.status}

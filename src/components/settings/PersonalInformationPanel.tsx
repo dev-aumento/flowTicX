@@ -210,6 +210,67 @@ function FormField({
 const inputClass =
   "w-full h-10 px-3 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20 focus:border-[#2563EB]";
 
+type SavedDirectoryProfile = {
+  email?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+  department?: string | null;
+  position?: string | null;
+};
+
+function directoryDisplayName(info: SavedDirectoryProfile, fallback?: string | null) {
+  const combined = [info.firstName?.trim(), info.lastName?.trim()].filter(Boolean).join(" ");
+  return combined || fallback || null;
+}
+
+function patchDirectoryUser<
+  T extends {
+    id: number;
+    email?: string | null;
+    name?: string | null;
+    department?: string | null;
+    position?: string | null;
+  },
+>(user: T, userId: number, info: SavedDirectoryProfile): T {
+  if (user.id !== userId) return user;
+  return {
+    ...user,
+    email: info.email !== undefined ? info.email : (user.email ?? null),
+    name: directoryDisplayName(info, user.name),
+    department: info.department !== undefined ? info.department : (user.department ?? null),
+    position: info.position !== undefined ? info.position : (user.position ?? null),
+  };
+}
+
+function mapDirectoryUsers<T extends { users?: unknown }>(
+  old: T | undefined,
+  userId: number,
+  info: SavedDirectoryProfile,
+): T | undefined {
+  if (!old || typeof old !== "object" || !("users" in old) || !Array.isArray(old.users)) return old;
+  return {
+    ...old,
+    users: old.users.map((user) =>
+      user && typeof user === "object" && "id" in user && typeof user.id === "number"
+        ? patchDirectoryUser(user as { id: number; email?: string | null; name?: string | null }, userId, info)
+        : user,
+    ),
+  };
+}
+
+/** Keep the employee list and detail caches on the email that was just saved. */
+function syncEmployeeDirectory(
+  utils: ReturnType<typeof trpc.useUtils>,
+  userId: number,
+  info: SavedDirectoryProfile,
+) {
+  utils.user.list.setQueriesData({}, (old) => mapDirectoryUsers(old, userId, info));
+  utils.user.listForPicker.setQueriesData({}, (old) => mapDirectoryUsers(old, userId, info));
+  utils.user.getById.setData({ id: userId }, (old) =>
+    old ? patchDirectoryUser(old, userId, info) : old,
+  );
+}
+
 type PersonalInformationPanelProps = {
   /** When set, loads and saves personal info for another user (admin/HR). */
   userId?: number;
@@ -267,11 +328,16 @@ export function PersonalInformationPanel({
   const selfUpdateMutation = trpc.auth.updatePersonalInfo.useMutation({
     onSuccess: async (updated) => {
       utils.auth.getPersonalInfo.setData(undefined, updated);
-      utils.auth.me.invalidate();
+      const directoryId = userId ?? user?.id;
+      if (directoryId != null) syncEmployeeDirectory(utils, directoryId, updated);
       await Promise.all([
+        utils.auth.me.invalidate(),
+        utils.user.list.invalidate(),
         utils.user.listForPicker.invalidate(),
+        directoryId != null ? utils.user.getById.invalidate({ id: directoryId }) : Promise.resolve(),
         refreshDashboardPage(utils),
       ]);
+      if (directoryId != null) syncEmployeeDirectory(utils, directoryId, updated);
       setEditing(false);
       setSaved(true);
       window.setTimeout(() => setSaved(false), 2000);
@@ -286,12 +352,14 @@ export function PersonalInformationPanel({
     onSuccess: async (updated) => {
       if (userId != null) {
         utils.user.getPersonalInfo.setData({ id: userId }, updated);
+        syncEmployeeDirectory(utils, userId, updated);
         await Promise.all([
           utils.user.getById.invalidate({ id: userId }),
           utils.user.list.invalidate(),
           utils.user.listForPicker.invalidate(),
           refreshDashboardPage(utils),
         ]);
+        syncEmployeeDirectory(utils, userId, updated);
       }
       setEditing(false);
       setSaved(true);

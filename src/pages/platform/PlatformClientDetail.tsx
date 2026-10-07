@@ -154,8 +154,13 @@ export default function PlatformClientDetail() {
     );
     setAmount(String(data.subscriptionAmount ?? 0));
     setNotes(data.planNotes ?? "");
-    setCancelReason(data.planCancelReason ?? "");
-  }, [data]);
+    if (!isInvited) setCancelReason(data.planCancelReason ?? "");
+  }, [data, isInvited]);
+
+  useEffect(() => {
+    if (!isInvited || !invitedQuery.data) return;
+    setCancelReason(invitedQuery.data.clientPlanCancelReason ?? "");
+  }, [isInvited, invitedQuery.data]);
 
   const update = trpc.platform.updateSubscription.useMutation({
     onSuccess: async () => {
@@ -177,6 +182,28 @@ export default function PlatformClientDetail() {
         utils.platform.overview.invalidate(),
       ]);
       toast.success("Plan cancelled");
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const cancelInvited = trpc.platform.cancelInvitedClient.useMutation({
+    onSuccess: async () => {
+      await Promise.all([
+        utils.platform.getInvitedClient.invalidate({ userId: invitedId }),
+        utils.platform.listInvitedClients.invalidate(),
+      ]);
+      toast.success("This client's plan was cancelled");
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const reactivateInvited = trpc.platform.reactivateInvitedClient.useMutation({
+    onSuccess: async () => {
+      await Promise.all([
+        utils.platform.getInvitedClient.invalidate({ userId: invitedId }),
+        utils.platform.listInvitedClients.invalidate(),
+      ]);
+      toast.success("This client's plan was restored");
     },
     onError: (err) => toast.error(err.message),
   });
@@ -294,11 +321,14 @@ export default function PlatformClientDetail() {
     );
   }
 
-  const cancelled = data.planStatus === "cancelled";
-  const busy = update.isPending || cancel.isPending || remove.isPending;
   const invitedPerson = isInvited ? invitedQuery.data : null;
   const displayName = invitedPerson?.name || data.ownerName;
   const displayEmail = invitedPerson?.email || data.ownerEmail;
+  const cancelled = isInvited
+    ? invitedPerson?.clientPlanStatus === "cancelled"
+    : data.planStatus === "cancelled";
+  const busy =
+    update.isPending || cancel.isPending || cancelInvited.isPending || reactivateInvited.isPending || remove.isPending;
 
   return (
     <div className="space-y-5">
@@ -320,7 +350,7 @@ export default function PlatformClientDetail() {
               <h1 className="text-2xl font-bold tracking-tight text-[#111827] sm:text-[28px] dark:text-white">
                 {displayName}
               </h1>
-              <StatusBadge status={data.planStatus} />
+              <StatusBadge status={isInvited ? (cancelled ? "cancelled" : "active") : data.planStatus} />
             </div>
             <p className="mt-1 text-sm text-[#6B7280]">
               {displayEmail || "No email"} · {data.name} ·{" "}
@@ -338,16 +368,41 @@ export default function PlatformClientDetail() {
         <div className="flex items-start gap-3 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-200">
           <ShieldAlert size={18} className="mt-0.5 shrink-0" />
           <div>
-            <p className="font-semibold">This plan is cancelled</p>
+            <p className="font-semibold">
+              {isInvited ? "This client's plan is cancelled" : "This plan is cancelled"}
+            </p>
             <p className="mt-0.5 text-red-600/80 dark:text-red-200/80">
-              {data.planCancelReason || "No reason recorded."}{" "}
-              {data.planCancelledAt ? `· ${formatPlanDate(data.planCancelledAt)}` : null}
+              {(isInvited ? invitedPerson?.clientPlanCancelReason : data.planCancelReason) ||
+                "No reason recorded."}{" "}
+              {isInvited
+                ? invitedPerson?.clientPlanCancelledAt
+                  ? `· ${formatPlanDate(invitedPerson.clientPlanCancelledAt)}`
+                  : null
+                : data.planCancelledAt
+                  ? `· ${formatPlanDate(data.planCancelledAt)}`
+                  : null}
             </p>
           </div>
         </div>
       ) : null}
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.4fr)_minmax(280px,0.8fr)]">
+        {isInvited ? (
+          <section className="space-y-3 rounded-2xl border border-[#E6E8EC] bg-white p-6 shadow-sm dark:border-[#1E293B] dark:bg-[#0F172A]">
+            <h2 className="text-base font-semibold text-[#111827] dark:text-white">This invited client</h2>
+            <p className="text-sm text-[#6B7280]">
+              {displayName} is invited into {invitedPerson?.organizationName || data.name}. Cancelling
+              their plan only blocks this person. The workspace subscription for the super admin stays
+              unchanged.
+            </p>
+            {data.planStatus === "cancelled" ? (
+              <p className="text-sm text-amber-700 dark:text-amber-300">
+                The workspace subscription for {data.name} is cancelled on its own. Restoring this
+                client does not change that. Open the workspace under Clients to turn it back on.
+              </p>
+            ) : null}
+          </section>
+        ) : (
         <form
           onSubmit={savePlan}
           className="space-y-5 rounded-2xl border border-[#E6E8EC] bg-white p-6 shadow-sm dark:border-[#1E293B] dark:bg-[#0F172A]"
@@ -456,6 +511,7 @@ export default function PlatformClientDetail() {
             ) : null}
           </div>
         </form>
+        )}
 
         <div className="space-y-5">
           <section className="rounded-2xl border border-[#E6E8EC] bg-white p-5 shadow-sm dark:border-[#1E293B] dark:bg-[#0F172A]">
@@ -518,9 +574,15 @@ export default function PlatformClientDetail() {
           </section>
 
           <section className="rounded-2xl border border-[#E6E8EC] bg-white p-5 shadow-sm dark:border-[#1E293B] dark:bg-[#0F172A]">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-[#6B7280]">Cancel plan</h2>
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-[#6B7280]">
+              {isInvited && cancelled ? "Restore access" : "Cancel plan"}
+            </h2>
             <p className="mt-1 text-sm text-[#6B7280]">
-              Ends the current subscription. The workspace stays in the customer list as cancelled.
+              {isInvited && cancelled
+                ? "Turns this invited client's access back on. The workspace subscription is not changed."
+                : isInvited
+                  ? "Ends this invited client's access only. The super admin workspace plan is not changed."
+                  : "Ends the current subscription. The workspace stays in the customer list as cancelled."}
             </p>
             <textarea
               value={cancelReason}
@@ -532,14 +594,35 @@ export default function PlatformClientDetail() {
             />
             <button
               type="button"
-              disabled={busy || cancelled}
+              disabled={busy || (cancelled && !isInvited)}
               onClick={() => {
+                if (isInvited) {
+                  if (cancelled) {
+                    reactivateInvited.mutate({ userId: invitedId });
+                    return;
+                  }
+                  if (!window.confirm(`Cancel the plan for ${displayName}? The workspace subscription will stay active.`)) {
+                    return;
+                  }
+                  cancelInvited.mutate({
+                    userId: invitedId,
+                    reason: cancelReason.trim() || undefined,
+                  });
+                  return;
+                }
                 if (!window.confirm(`Cancel ${planLabel(data.plan)} for ${data.name}?`)) return;
                 cancel.mutate({ organizationId: orgId, reason: cancelReason.trim() || undefined });
               }}
-              className="mt-3 inline-flex h-10 items-center rounded-xl bg-red-600 px-4 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+              className={cn(
+                "mt-3 inline-flex h-10 items-center rounded-xl px-4 text-sm font-semibold text-white disabled:opacity-50",
+                isInvited && cancelled ? "bg-[#2563EB] hover:bg-[#1D4ED8]" : "bg-red-600 hover:bg-red-700",
+              )}
             >
-              {cancel.isPending ? "Cancelling..." : "Cancel plan"}
+              {cancel.isPending || cancelInvited.isPending || reactivateInvited.isPending
+                ? "Saving..."
+                : isInvited && cancelled
+                  ? "Restore this client"
+                  : "Cancel plan"}
             </button>
           </section>
 

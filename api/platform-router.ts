@@ -277,6 +277,29 @@ async function loadPlatformSettings(user: {
   };
 }
 
+/** Client user invited into a staff workspace, not a standalone client portal. */
+async function requireInvitedClient(userId: number) {
+  if (!hasMongoConfigured()) {
+    throw new TRPCError({ code: "NOT_FOUND", message: "Invited client not found" });
+  }
+  const userCol = await getCollection<UserDoc>(Collections.users);
+  const user = await userCol.findOne({ id: userId, role: "client" });
+  if (!user) {
+    throw new TRPCError({ code: "NOT_FOUND", message: "Invited client not found" });
+  }
+  if (user.organizationId != null) {
+    const orgCol = await getCollection<OrganizationDoc>(Collections.organizations);
+    const org = await orgCol.findOne({ id: user.organizationId });
+    if (org?.workspaceType === "client") {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "This person belongs to their own client workspace. Cancel that workspace plan instead.",
+      });
+    }
+  }
+  return user;
+}
+
 export const platformRouter = createRouter({
   overview: platformQuery.query(async () => {
     const [customers, plans] = await Promise.all([listCustomerOrgs(), listPlatformPlans()]);
@@ -343,11 +366,12 @@ export const platformRouter = createRouter({
         .map((user) => {
           const org =
             user.organizationId != null ? orgById.get(user.organizationId) ?? null : null;
+          const planCancelled = user.clientPlanStatus === "cancelled";
           return {
             id: user.id,
             name: user.name?.trim() || user.email || "Client",
             email: user.email ?? null,
-            status: user.status ?? "active",
+            status: planCancelled ? "cancelled" : (user.status ?? "active"),
             organizationId: org?.id ?? null,
             organizationName: org?.name ?? "Unknown workspace",
             createdAt: user.createdAt,
@@ -400,7 +424,10 @@ export const platformRouter = createRouter({
         name: user.name?.trim() || user.email || "Client",
         email: user.email ?? null,
         phone: user.phone ?? null,
-        status: user.status ?? "active",
+        status: user.clientPlanStatus === "cancelled" ? "cancelled" : (user.status ?? "active"),
+        clientPlanStatus: user.clientPlanStatus === "cancelled" ? "cancelled" : "active",
+        clientPlanCancelledAt: user.clientPlanCancelledAt ?? null,
+        clientPlanCancelReason: user.clientPlanCancelReason ?? null,
         createdAt: user.createdAt,
         clientCanViewTimeTracking: user.clientCanViewTimeTracking === true,
         clientCanViewDueDate: user.clientCanViewDueDate === true,
@@ -415,6 +442,46 @@ export const platformRouter = createRouter({
         organizationId: org?.id ?? null,
         organizationName: org?.name ?? "Unknown workspace",
       };
+    }),
+
+  cancelInvitedClient: platformQuery
+    .input(
+      z.object({
+        userId: z.number().int().positive(),
+        reason: z.string().max(500).optional(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const user = await requireInvitedClient(input.userId);
+      const now = new Date();
+      const updated = await updateById<UserDoc>(Collections.users, user.id, {
+        clientPlanStatus: "cancelled",
+        clientPlanCancelledAt: now,
+        clientPlanCancelReason: input.reason?.trim() || user.clientPlanCancelReason || null,
+        updatedAt: now,
+      });
+      if (!updated) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Invited client not found" });
+      }
+      invalidateAuthUserCache(updated.id);
+      return { id: updated.id, clientPlanStatus: "cancelled" as const };
+    }),
+
+  reactivateInvitedClient: platformQuery
+    .input(z.object({ userId: z.number().int().positive() }))
+    .mutation(async ({ input }) => {
+      const user = await requireInvitedClient(input.userId);
+      const updated = await updateById<UserDoc>(Collections.users, user.id, {
+        clientPlanStatus: "active",
+        clientPlanCancelledAt: null,
+        clientPlanCancelReason: null,
+        updatedAt: new Date(),
+      });
+      if (!updated) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Invited client not found" });
+      }
+      invalidateAuthUserCache(updated.id);
+      return { id: updated.id, clientPlanStatus: "active" as const };
     }),
 
   getClient: platformQuery

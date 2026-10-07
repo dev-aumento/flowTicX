@@ -97,10 +97,19 @@ export function subscriptionBlockReason(
 }
 
 export async function getSubscriptionBlock(
-  user: Pick<SafeUser | UserDoc, "role" | "organizationId">,
+  user: Pick<SafeUser | UserDoc, "role" | "organizationId"> & {
+    clientPlanStatus?: "active" | "cancelled" | null;
+  },
 ): Promise<"expired" | "cancelled" | null> {
   if (String(user.role ?? "").toLowerCase() === "platform") return null;
   if (!hasMongoConfigured()) return null;
+  // An invited client's own cancellation must not depend on the workspace plan.
+  if (
+    String(user.role ?? "").toLowerCase() === "client" &&
+    user.clientPlanStatus === "cancelled"
+  ) {
+    return "cancelled";
+  }
   if (user.organizationId == null || user.organizationId <= 0) return null;
 
   const loaded = await findOrganizationById(user.organizationId);

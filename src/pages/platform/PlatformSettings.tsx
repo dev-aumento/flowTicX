@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
-import { ArrowLeft, Loader2, Upload, X } from "lucide-react";
+import { ArrowLeft, Loader2 } from "lucide-react";
 import { trpc } from "@/providers/trpc";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
@@ -19,66 +19,14 @@ function SettingsExitBar() {
 }
 
 const EMPTY_FORM = {
-  organizationName: "",
-  logoDataUrl: null as string | null,
   firstName: "",
   lastName: "",
   email: "",
   phone: "",
 };
 
-function readLogoFile(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    if (!file.type.startsWith("image/")) {
-      reject(new Error("Please upload an image file for the logo."));
-      return;
-    }
-    if (file.size > 1024 * 1024) {
-      reject(new Error("Logo must be 1MB or smaller."));
-      return;
-    }
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error("Could not read the logo file."));
-    reader.onload = () => {
-      const raw = typeof reader.result === "string" ? reader.result : "";
-      if (!raw) {
-        reject(new Error("Could not read the logo file."));
-        return;
-      }
-      const img = new Image();
-      img.onload = () => {
-        const maxSide = 640;
-        const srcW = Math.max(1, img.naturalWidth || img.width || 1);
-        const srcH = Math.max(1, img.naturalHeight || img.height || 1);
-        const scale = Math.min(1, maxSide / Math.max(srcW, srcH));
-        const width = Math.max(1, Math.round(srcW * scale));
-        const height = Math.max(1, Math.round(srcH * scale));
-        const canvas = document.createElement("canvas");
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) {
-          resolve(raw);
-          return;
-        }
-        ctx.clearRect(0, 0, width, height);
-        ctx.drawImage(img, 0, 0, width, height);
-        try {
-          resolve(canvas.toDataURL("image/png"));
-        } catch {
-          resolve(raw);
-        }
-      };
-      img.onerror = () => resolve(raw);
-      img.src = raw;
-    };
-    reader.readAsDataURL(file);
-  });
-}
-
 export default function PlatformSettings() {
   const utils = trpc.useUtils();
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const { data, isLoading } = trpc.platform.settings.useQuery();
   const update = trpc.platform.updateSettings.useMutation({
     onSuccess: async (result) => {
@@ -94,8 +42,6 @@ export default function PlatformSettings() {
   useEffect(() => {
     if (!data) return;
     const next = {
-      organizationName: data.organizationName ?? "",
-      logoDataUrl: data.logoDataUrl ?? null,
       firstName: data.firstName ?? "",
       lastName: data.lastName ?? "",
       email: data.email ?? "",
@@ -107,30 +53,14 @@ export default function PlatformSettings() {
 
   const dirty = useMemo(() => {
     return (
-      form.organizationName.trim() !== saved.organizationName.trim() ||
       form.firstName.trim() !== saved.firstName.trim() ||
       form.lastName.trim() !== saved.lastName.trim() ||
       form.email.trim() !== saved.email.trim() ||
-      form.phone.trim() !== saved.phone.trim() ||
-      (form.logoDataUrl ?? null) !== (saved.logoDataUrl ?? null)
+      form.phone.trim() !== saved.phone.trim()
     );
   }, [form, saved]);
 
-  const canSave =
-    dirty &&
-    form.organizationName.trim().length > 0 &&
-    form.firstName.trim().length > 0 &&
-    form.email.trim().length > 0;
-
-  async function handleLogoChange(file: File | null) {
-    if (!file) return;
-    try {
-      const logoDataUrl = await readLogoFile(file);
-      setForm((prev) => ({ ...prev, logoDataUrl }));
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not upload logo");
-    }
-  }
+  const canSave = dirty && form.firstName.trim().length > 0 && form.email.trim().length > 0;
 
   if (isLoading) {
     return (
@@ -152,7 +82,7 @@ export default function PlatformSettings() {
           Platform Settings
         </h1>
         <p className="text-sm text-[#6B7280]">
-          Branding and contact details for the Aaso master admin console.
+          Contact details for the Aaso master admin console.
         </p>
       </div>
 
@@ -162,8 +92,8 @@ export default function PlatformSettings() {
           event.preventDefault();
           if (!canSave) return;
           update.mutate({
-            organizationName: form.organizationName.trim(),
-            logoDataUrl: form.logoDataUrl,
+            organizationName: data?.organizationName?.trim() || "Aaso",
+            logoDataUrl: data?.logoDataUrl ?? null,
             firstName: form.firstName.trim(),
             lastName: form.lastName.trim(),
             email: form.email.trim(),
@@ -171,66 +101,6 @@ export default function PlatformSettings() {
           });
         }}
       >
-        <div className="space-y-2">
-          <Label>Logo of the CRM</Label>
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="flex h-28 w-full flex-col items-center justify-center gap-2 overflow-hidden rounded-xl border border-dashed border-[#D1D5DB] bg-[#F8FAFC] transition-colors hover:bg-[#F3F4F6] sm:w-56 dark:border-[#334155] dark:bg-[#1E293B] dark:hover:bg-[#1E293B]/80"
-            >
-              {form.logoDataUrl ? (
-                <img
-                  src={form.logoDataUrl}
-                  alt="CRM logo"
-                  className="max-h-full max-w-full object-contain"
-                />
-              ) : (
-                <>
-                  <Upload size={22} className="text-[#9CA3AF]" />
-                  <span className="px-3 text-center text-xs font-medium text-[#6B7280]">
-                    Upload CRM logo
-                  </span>
-                </>
-              )}
-            </button>
-            <div className="space-y-2 text-xs text-[#6B7280]">
-              <p>Shown in the master admin console. PNG, JPG, or SVG. Max 1MB.</p>
-              <p>Preferred size: 240 × 240 pixels.</p>
-              {form.logoDataUrl ? (
-                <button
-                  type="button"
-                  onClick={() => setForm((prev) => ({ ...prev, logoDataUrl: null }))}
-                  className="inline-flex items-center gap-1 text-sm font-medium text-red-600 hover:text-red-700"
-                >
-                  <X size={14} />
-                  Remove logo
-                </button>
-              ) : null}
-            </div>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(event) => {
-                void handleLogoChange(event.target.files?.[0] ?? null);
-                event.target.value = "";
-              }}
-            />
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="platform-org">Platform name</Label>
-          <Input
-            id="platform-org"
-            value={form.organizationName}
-            onChange={(event) => setForm((prev) => ({ ...prev, organizationName: event.target.value }))}
-            className="h-11"
-          />
-        </div>
-
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="platform-first-name">First name</Label>

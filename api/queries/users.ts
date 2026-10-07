@@ -77,6 +77,7 @@ export async function createUser(
     headOfDepartmentUserIds?: number[];
     permissions?: string[];
     sortOrder?: number;
+    sampleEmployee?: boolean | null;
   },
   options?: { inviteId?: number | null },
 ) {
