@@ -1329,7 +1329,10 @@ export const authRouter = createRouter({
       }
 
       const healed = useMemoryStore() ? user : await healPortalUser(user);
-      await assertActiveSubscription(healed);
+      await assertActiveSubscription(healed, {
+        reqHeaders: ctx.req.headers,
+        resHeaders: ctx.resHeaders,
+      });
       if (!useMemoryStore()) await updateLastSignIn(user.id);
       else mock.mockUpdateLastSignIn(user.id);
 
@@ -1371,7 +1374,10 @@ export const authRouter = createRouter({
           });
         }
         await assertLoginPortal(user, input.portal);
-        await assertActiveSubscription(user);
+        await assertActiveSubscription(user, {
+          reqHeaders: ctx.req.headers,
+          resHeaders: ctx.resHeaders,
+        });
         mock.mockUpdateLastSignIn(user.id);
         const token = await createSessionForUser(
           user.id,
@@ -1428,7 +1434,10 @@ export const authRouter = createRouter({
         const healed = await healPortalUser(user);
         Object.assign(user, healed);
 
-        await assertActiveSubscription(user);
+        await assertActiveSubscription(user, {
+          reqHeaders: ctx.req.headers,
+          resHeaders: ctx.resHeaders,
+        });
 
         await updateLastSignIn(user.id);
         const token = await createSessionForUser(

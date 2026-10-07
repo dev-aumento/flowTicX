@@ -60,6 +60,7 @@ import FinanceLogin from './pages/FinanceLogin'
 import ClientLogin from './pages/ClientLogin'
 import PlatformLogin from './pages/PlatformLogin'
 import PlanEnded from './pages/PlanEnded'
+import RenewPricing from './pages/RenewPricing'
 import { PlatformLayout } from './components/layout/PlatformLayout'
 import PlatformOverview from './pages/platform/PlatformOverview'
 import PlatformClients from './pages/platform/PlatformClients'
@@ -263,6 +264,7 @@ export default function App() {
         }
       />
       <Route path="/plan-ended" element={<PlanEnded />} />
+      <Route path="/pricing" element={<RenewPricing />} />
       <Route path="/invite/:token" element={<InviteAccept />} />
 
       <Route element={<RequireAuth />}>

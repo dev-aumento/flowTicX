@@ -6,6 +6,7 @@ import { findOrganizationById } from "./tenant";
 import { findPlatformPlan } from "./platform-plans";
 import { hasMongoConfigured } from "../queries/mongo";
 import { clearSessionCookie, invalidateAuthUserCache } from "./auth";
+import { appendPlanRenewalCookie } from "./plan-renewal";
 import { isFreeTierPlan, endOfPlanDay } from "./plan-expiry";
 import { updateById } from "../queries/connection";
 import { Collections } from "@db/mongo/collections";
@@ -128,11 +129,14 @@ export function subscriptionBlockError(reason: "expired" | "cancelled") {
 }
 
 export async function assertActiveSubscription(
-  user: Pick<SafeUser | UserDoc, "role" | "organizationId">,
+  user: Pick<SafeUser | UserDoc, "id" | "role" | "organizationId">,
   session?: { reqHeaders: Headers; resHeaders: Headers },
 ) {
   const reason = await getSubscriptionBlock(user);
   if (!reason) return;
+  if (session && String(user.role ?? "").toLowerCase() === "admin") {
+    await appendPlanRenewalCookie(session.resHeaders, session.reqHeaders, user.id);
+  }
   if (session) {
     clearSessionCookie(session.reqHeaders, session.resHeaders);
   }

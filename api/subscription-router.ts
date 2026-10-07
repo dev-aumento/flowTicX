@@ -1,20 +1,36 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { Collections } from "@db/mongo/collections";
-import type { OrganizationDoc } from "@db/mongo/types";
-import { createRouter, adminQuery, authedQuery } from "./middleware";
-import { hasMongoConfigured, updateById } from "./queries/connection";
+import { createRouter, adminQuery, authedQuery, publicQuery } from "./middleware";
 import { findOrganizationById, requireOrganizationId } from "./lib/tenant";
 import { findPlatformPlan, listPlatformPlans } from "./lib/platform-plans";
 import { addPlanDuration } from "@/lib/platform-admin";
 import { resolveOrgPlanAccess, settleIntroEnterprise } from "./lib/subscription-access";
 import { isFreeTierPlan, planDaysRemaining, planExpiryWarning } from "./lib/plan-expiry";
-import { invalidateAuthUserCache } from "./lib/auth";
-import { queuePlanNotification } from "./lib/notify-plan";
-import { ensureSampleProjects } from "./lib/sample-workspace";
+import { activateOrganizationPlan } from "./lib/activate-plan";
+import { clearPlanRenewalCookie, userFromPlanRenewalCookie } from "./lib/plan-renewal";
+import { createSessionForUser } from "./lib/auth";
+import { toSessionUser } from "./lib/client-workspace";
 
 export const subscriptionRouter = createRouter({
   plans: authedQuery.query(async () => listPlatformPlans()),
+
+  /** Public catalog used on the plan-ended renew page. Same plans the master admin maintains. */
+  catalog: publicQuery.query(async () => listPlatformPlans()),
+
+  renewContext: publicQuery.query(async ({ ctx }) => {
+    const user = await userFromPlanRenewalCookie(ctx.req.headers);
+    if (!user) {
+      return { signedIn: false, canRenew: false, organizationName: null as string | null, name: null as string | null };
+    }
+    const org =
+      user.organizationId != null ? await findOrganizationById(user.organizationId) : null;
+    return {
+      signedIn: true,
+      canRenew: String(user.role ?? "").toLowerCase() === "admin" && org?.workspaceType !== "platform",
+      organizationName: org?.name ?? null,
+      name: user.name?.trim() || user.email || null,
+    };
+  }),
 
   current: authedQuery.query(async ({ ctx }) => {
     const organizationId = requireOrganizationId(ctx.user);
@@ -51,74 +67,35 @@ export const subscriptionRouter = createRouter({
   selectPlan: adminQuery
     .input(z.object({ slug: z.string().min(1).max(64) }))
     .mutation(async ({ ctx, input }) => {
-      if (!hasMongoConfigured()) {
-        throw new TRPCError({
-          code: "PRECONDITION_FAILED",
-          message: "Database is not configured",
-        });
-      }
-
       const organizationId = requireOrganizationId(ctx.user);
       const org = await findOrganizationById(organizationId);
       if (!org || org.workspaceType === "platform") {
         throw new TRPCError({ code: "NOT_FOUND", message: "Workspace not found" });
       }
+      return activateOrganizationPlan({ org, slug: input.slug, actorId: ctx.user.id });
+    }),
 
-      const catalog = await findPlatformPlan(input.slug);
-      if (!catalog) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Plan not found" });
+  renew: publicQuery
+    .input(z.object({ slug: z.string().min(1).max(64) }))
+    .mutation(async ({ ctx, input }) => {
+      const user = await userFromPlanRenewalCookie(ctx.req.headers);
+      if (!user || String(user.role ?? "").toLowerCase() !== "admin") {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Sign in as the workspace super admin to renew this plan.",
+        });
       }
-
-      const now = new Date();
-      const startsAt = now;
-      const expiresAt = addPlanDuration(startsAt, catalog.slug, catalog.durationDays);
-      const isTrial = catalog.slug === "trial" || catalog.amount === 0;
-      const planStatus = isTrial ? "trial" : org.planStatus === "paid" ? "paid" : "unpaid";
-
-      const updated = await updateById<OrganizationDoc>(Collections.organizations, org.id, {
-        plan: catalog.slug,
-        planStatus,
-        subscriptionAmount: catalog.amount,
-        purchasedAt: org.purchasedAt ?? now,
-        planStartsAt: startsAt,
-        planExpiresAt: expiresAt,
-        planCancelledAt: null,
-        planCancelReason: null,
-        introEnterprise: false,
-        updatedAt: now,
-      });
-      if (!updated) {
+      if (user.organizationId == null) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Workspace not found" });
+      }
+      const org = await findOrganizationById(user.organizationId);
+      if (!org || org.workspaceType === "platform") {
         throw new TRPCError({ code: "NOT_FOUND", message: "Workspace not found" });
       }
 
-      const previousSlug = org.plan ?? "trial";
-      const previousStatus = org.planStatus ?? "trial";
-      const sameActivePlan = previousSlug === catalog.slug && previousStatus !== "cancelled";
-      if (!sameActivePlan) {
-        queuePlanNotification({
-          kind: previousStatus === "cancelled" ? "joined" : "updated",
-          organizationId: updated.id,
-          organizationName: updated.name,
-          planName: catalog.name,
-          actorId: ctx.user.id,
-        });
-      }
-
-      invalidateAuthUserCache();
-      try {
-        await ensureSampleProjects(updated.id, updated.plan ?? "trial");
-      } catch (error) {
-        console.error("[subscription] Sample projects were not updated:", error);
-      }
-      const access = await resolveOrgPlanAccess(updated);
-      return {
-        organizationId,
-        organizationName: updated.name,
-        ...access,
-        subscriptionAmount: updated.subscriptionAmount ?? catalog.amount,
-        planStartsAt: updated.planStartsAt ?? startsAt,
-        planExpiresAt: updated.planExpiresAt ?? expiresAt,
-        durationDays: catalog.durationDays,
-      };
+      const plan = await activateOrganizationPlan({ org, slug: input.slug, actorId: user.id });
+      clearPlanRenewalCookie(ctx.req.headers, ctx.resHeaders);
+      const token = await createSessionForUser(user.id, ctx.req.headers, ctx.resHeaders);
+      return { ...plan, user: await toSessionUser(user), token };
     }),
 });

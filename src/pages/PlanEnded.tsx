@@ -17,7 +17,8 @@ export default function PlanEnded() {
         <h1 className="text-xl font-bold text-gray-900">Plan ended</h1>
         <p className="mt-2 text-sm text-gray-500 leading-relaxed">{message}</p>
         <p className="mt-3 text-sm text-gray-500">
-          Ask your Aaso administrator to renew or purchase a plan, then sign in again.
+          The workspace super admin can choose a monthly or yearly plan. Access follows the features
+          included in that plan.
         </p>
         <Link
           to="/login"
@@ -25,6 +26,12 @@ export default function PlanEnded() {
           className="mt-6 inline-flex h-11 w-full items-center justify-center rounded-lg bg-[#2563EB] text-sm font-semibold text-white hover:bg-[#1D4ED8]"
         >
           Back to sign in
+        </Link>
+        <Link
+          to="/pricing"
+          className="mt-3 inline-flex h-11 w-full items-center justify-center rounded-lg border border-[#2563EB] text-sm font-semibold text-[#2563EB] hover:bg-[#EEF4FF]"
+        >
+          Renew your plan
         </Link>
       </div>
     </OrgAuthShell>

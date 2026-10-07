@@ -154,6 +154,8 @@ export default function LeaveManagement() {
   const { user } = useAuth();
   const utils = trpc.useUtils();
   const [filter, setFilter] = useState<FilterTab>("all");
+  const [requestSearch, setRequestSearch] = useState("");
+  const [debouncedRequestSearch, setDebouncedRequestSearch] = useState("");
   const [selectedRequest, setSelectedRequest] = useState<LeaveRequestRow | null>(null);
   const [cellLeaves, setCellLeaves] = useState<{
     employeeName: string;
@@ -176,9 +178,17 @@ export default function LeaveManagement() {
   const [expandedWfhIds, setExpandedWfhIds] = useState<Set<number>>(() => new Set());
   const allowed = canManageLeaves(user);
 
-  const { data, isLoading } = trpc.leave.listPending.useQuery(undefined, {
-    enabled: allowed,
-  });
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedRequestSearch(requestSearch.trim());
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [requestSearch]);
+
+  const { data, isLoading } = trpc.leave.listPending.useQuery(
+    { search: debouncedRequestSearch || undefined },
+    { enabled: allowed },
+  );
   const { data: usersData } = trpc.user.listForPicker.useQuery(
     { limit: 500 },
     { enabled: allowed },
@@ -877,35 +887,50 @@ export default function LeaveManagement() {
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        {(
-          [
-            { key: "all", label: "All" },
-            { key: "pending", label: "Pending" },
-            { key: "approved", label: "Approved" },
-            { key: "rejected", label: "Rejected" },
-            { key: "cancelled", label: "Cancelled" },
-            { key: "wfh", label: "WFH Requests" },
-          ] as const
-        ).map((tab) => (
-          <button
-            key={tab.key}
-            type="button"
-            onClick={() => setFilter(tab.key)}
-            className={cn(
-              "h-9 px-3 rounded-lg text-sm font-medium border transition-colors",
-              filter === tab.key
-                ? tab.key === "wfh"
-                  ? "bg-teal-600 text-white border-teal-600"
-                  : "bg-[#2563EB] text-white border-[#2563EB]"
-                : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50",
-            )}
-          >
-            {tab.label}
-            {tab.key === "pending" && pendingCount > 0 ? ` (${pendingCount})` : ""}
-            {tab.key === "wfh" && wfhCount > 0 ? ` (${wfhCount})` : ""}
-          </button>
-        ))}
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-wrap gap-2">
+          {(
+            [
+              { key: "all", label: "All" },
+              { key: "pending", label: "Pending" },
+              { key: "approved", label: "Approved" },
+              { key: "rejected", label: "Rejected" },
+              { key: "cancelled", label: "Cancelled" },
+              { key: "wfh", label: "WFH Requests" },
+            ] as const
+          ).map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setFilter(tab.key)}
+              className={cn(
+                "h-9 px-3 rounded-lg text-sm font-medium border transition-colors",
+                filter === tab.key
+                  ? tab.key === "wfh"
+                    ? "bg-teal-600 text-white border-teal-600"
+                    : "bg-[#2563EB] text-white border-[#2563EB]"
+                  : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50",
+              )}
+            >
+              {tab.label}
+              {tab.key === "pending" && pendingCount > 0 ? ` (${pendingCount})` : ""}
+              {tab.key === "wfh" && wfhCount > 0 ? ` (${wfhCount})` : ""}
+            </button>
+          ))}
+        </div>
+        <div className="relative w-full lg:w-80 lg:shrink-0">
+          <Search
+            size={15}
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+          />
+          <input
+            type="search"
+            value={requestSearch}
+            onChange={(event) => setRequestSearch(event.target.value)}
+            placeholder="Search name, date, reason…"
+            className="h-9 w-full rounded-lg border border-gray-200 bg-white pl-9 pr-3 text-sm text-gray-800 placeholder:text-gray-400 focus:border-[#2563EB] focus:outline-none focus:ring-2 focus:ring-[#2563EB]/20"
+          />
+        </div>
       </div>
 
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
@@ -915,9 +940,11 @@ export default function LeaveManagement() {
           </div>
         ) : requests.length === 0 ? (
           <div className="py-16 text-center text-sm text-gray-500">
-            {filter === "wfh"
-              ? "No work-from-home requests yet."
-              : "No leave requests in this view."}
+            {requestSearch.trim()
+              ? `No leave requests match “${requestSearch.trim()}”.`
+              : filter === "wfh"
+                ? "No work-from-home requests yet."
+                : "No leave requests in this view."}
           </div>
         ) : (
           <div className="max-h-[26.25rem] overflow-y-auto overscroll-contain divide-y divide-gray-100 scrollbar-thin">

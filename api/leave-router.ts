@@ -82,6 +82,100 @@ function assertLeaveManager(user: {
   }
 }
 
+function escapeSearchRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function leaveSearchTypeSlugs(search: string) {
+  const q = search.toLowerCase();
+  const slugs = new Set<string>();
+  if (/\bwfh\b|work from home/.test(q)) slugs.add("wfh");
+  if (/\bpaid\b|\bpl\b/.test(q)) slugs.add("paid");
+  if (/\bsick\b|\bsl\b/.test(q)) slugs.add("sick");
+  if (/\bunpaid\b|\bul\b/.test(q)) slugs.add("unpaid");
+  if (/\bhalf\b/.test(q)) slugs.add("half");
+  return [...slugs];
+}
+
+function leaveSearchStatuses(search: string) {
+  const q = search.toLowerCase();
+  const statuses = new Set<string>();
+  if (q.includes("pending")) statuses.add("pending");
+  if (q.includes("approved")) statuses.add("approved");
+  if (q.includes("rejected")) statuses.add("rejected");
+  if (q.includes("cancel")) statuses.add("cancelled");
+  return [...statuses];
+}
+
+async function leaveRequestSearchFilter(
+  user: Pick<UserDoc, "organizationId" | "id">,
+  search: string,
+) {
+  const base = orgFilter(user);
+  if (!search) return base;
+  const regex = new RegExp(escapeSearchRegex(search), "i");
+  const usersCol = await getCollection<UserDoc>(Collections.users);
+  const matchedUsers = await usersCol
+    .find({
+      ...base,
+      $or: [{ name: regex }, { email: regex }, { department: regex }],
+    })
+    .project({ id: 1 })
+    .limit(300)
+    .toArray();
+  const typeSlugs = leaveSearchTypeSlugs(search);
+  const statuses = leaveSearchStatuses(search);
+  return {
+    ...base,
+    $or: [
+      ...(matchedUsers.length ? [{ userId: { $in: matchedUsers.map((row) => row.id) } }] : []),
+      { reason: regex },
+      { reviewNote: regex },
+      { startDate: regex },
+      { endDate: regex },
+      { leaveType: regex },
+      { status: regex },
+      ...(typeSlugs.length ? [{ leaveType: { $in: typeSlugs } }] : []),
+      ...(statuses.length ? [{ status: { $in: statuses } }] : []),
+    ],
+  };
+}
+
+function leaveRequestMatchesSearch(
+  request: {
+    leaveType?: string | null;
+    startDate?: string | null;
+    endDate?: string | null;
+    reason?: string | null;
+    status?: string | null;
+    reviewNote?: string | null;
+    days?: number | null;
+    employee?: { name?: string | null; email?: string | null; department?: string | null } | null;
+  },
+  query: string,
+) {
+  const haystack = [
+    request.employee?.name,
+    request.employee?.email,
+    request.employee?.department,
+    request.reason,
+    request.reviewNote,
+    request.startDate,
+    request.endDate,
+    request.status,
+    request.leaveType,
+    leaveTypeLabel(request.leaveType ?? "", {
+      isHalfDay: request.leaveType === "half",
+      days: request.days,
+    }),
+    isWorkFromHomeLeave(request.leaveType) ? "wfh work from home" : "",
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(query);
+}
+
 async function computeUsage(
   userId: number,
   year: number,
@@ -710,16 +804,26 @@ export const leaveRouter = createRouter({
     return { request };
   }),
 
-  listPending: authedQuery.query(async ({ ctx }) => {
+  listPending: authedQuery
+    .input(z.object({ search: z.string().max(200).optional() }).optional())
+    .query(async ({ ctx, input }) => {
     assertLeaveManager(ctx.user);
-    if (useMock()) return mock.mockListLeaveRequests();
+    const search = input?.search?.trim() ?? "";
+    if (useMock()) {
+      const listed = mock.mockListLeaveRequests();
+      if (!search) return listed;
+      const q = search.toLowerCase();
+      return {
+        requests: listed.requests.filter((request) => leaveRequestMatchesSearch(request, q)).slice(0, 500),
+      };
+    }
 
     await ensureSchema();
     const col = await getCollection<LeaveRequestDoc>(Collections.leaveRequests);
     const requests = await col
-      .find(orgFilter(ctx.user))
+      .find(await leaveRequestSearchFilter(ctx.user, search))
       .sort({ createdAt: -1 })
-      .limit(200)
+      .limit(search ? 500 : 200)
       .toArray();
     const userIds = [...new Set(requests.map((r) => r.userId))];
     const usersCol = await getCollection<UserDoc>(Collections.users);

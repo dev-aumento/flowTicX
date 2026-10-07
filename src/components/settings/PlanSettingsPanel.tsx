@@ -1,4 +1,5 @@
 import { Check, Loader2 } from "lucide-react";
+import { Link } from "react-router";
 import { trpc } from "@/providers/trpc";
 import {
   detectPlanCurrency,
@@ -11,8 +12,6 @@ import {
   statusLabel,
 } from "@/lib/platform-admin";
 import { planChecklist, resolvePlanEntitlement } from "@/lib/plan-entitlements";
-
-const AASO_PRICING_URL = "https://aaso.tech/pricing/";
 
 export function PlanSettingsPanel() {
   const currentQuery = trpc.subscription.current.useQuery();
@@ -79,12 +78,13 @@ export function PlanSettingsPanel() {
           <h2 className="text-lg font-semibold text-[#1F2937]">Plans</h2>
           <p className="mt-0.5 text-sm text-gray-500">Your workspace subscription</p>
         </div>
-        <a
-          href={AASO_PRICING_URL}
+        <Link
+          to="/pricing"
+          state={{ returnTo: "/settings" }}
           className="inline-flex h-10 items-center justify-center rounded-lg bg-gradient-to-r from-[#2563EB] to-[#3B82F6] px-5 text-sm font-semibold text-white hover:shadow-lg hover:shadow-blue-200"
         >
           Upgrade plan
-        </a>
+        </Link>
       </div>
 
       <section className="rounded-xl border border-gray-200 p-5">

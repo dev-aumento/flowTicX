@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useLocation } from "react-router";
 import { useAuth } from "@/hooks/useAuth";
 import { trpc } from "@/providers/trpc";
 import { UserAvatar } from "@/components/shared/UserAvatar";
@@ -108,7 +109,10 @@ export default function Settings() {
   const utils = trpc.useUtils();
   const financeOnly = isFinanceRoleOnly(user);
   const clientPortal = isClientPortalUser(user);
-  const [activeTab, setActiveTab] = useState("profile");
+  const location = useLocation();
+  const [activeTab, setActiveTab] = useState(
+    (location.state as { tab?: string } | null)?.tab === "plans" ? "plans" : "profile",
+  );
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
@@ -176,7 +180,7 @@ export default function Settings() {
   }, [workspaceCurrency?.currency, savedWorkspace.currency]);
 
   useEffect(() => {
-    if (user?.role !== "admin" && (activeTab === "organization" || activeTab === "plans")) {
+    if (user && user.role !== "admin" && (activeTab === "organization" || activeTab === "plans")) {
       setActiveTab("profile");
       return;
     }
