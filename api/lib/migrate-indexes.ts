@@ -51,6 +51,14 @@ export async function ensureIndexes() {
       ],
     },
     {
+      name: Collections.subscriptionCheckouts,
+      indexes: [
+        { key: { id: 1 }, unique: true },
+        { key: { razorpayOrderId: 1 }, unique: true },
+        { key: { organizationId: 1, createdAt: -1 } },
+      ],
+    },
+    {
       name: Collections.users,
       indexes: [
         { key: { id: 1 }, unique: true },

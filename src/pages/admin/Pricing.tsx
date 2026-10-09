@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { trpc } from "@/providers/trpc";
 import {
-  detectPlanCurrency,
   formatPlanDate,
   formatPlanDuration,
   formatPlanMoney,
@@ -16,6 +15,7 @@ import {
 import { isPopularPlan } from "@/lib/plan-entitlements";
 import { PlanPricingCard } from "@/components/billing/PlanPricingCard";
 import { PlanIntervalTabs } from "@/components/billing/PlanIntervalTabs";
+import { completePlanCheckout, RazorpayCheckoutClosed } from "@/lib/razorpay-checkout";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -23,19 +23,11 @@ export default function AdminPricing() {
   const utils = trpc.useUtils();
   const { data: plans, isLoading } = trpc.subscription.plans.useQuery();
   const { data: current } = trpc.subscription.current.useQuery();
-  const select = trpc.subscription.selectPlan.useMutation({
-    onSuccess: async (result) => {
-      await Promise.all([
-        utils.auth.me.invalidate(),
-        utils.subscription.current.invalidate(),
-        utils.subscription.plans.invalidate(),
-      ]);
-      toast.success(`${result.planName ?? "Plan"} is now active`);
-    },
-    onError: (error) => toast.error(error.message),
-  });
+  const beginCheckout = trpc.subscription.beginCheckout.useMutation();
+  const confirmPayment = trpc.subscription.confirmPayment.useMutation();
+  const [pendingSlug, setPendingSlug] = useState<string | null>(null);
 
-  const currency = detectPlanCurrency();
+  const currency = "INR" as const;
   const [interval, setInterval] = useState<PlanBillingInterval>("month");
   const [syncedInterval, setSyncedInterval] = useState(false);
   const currentSlug = current?.plan ?? "";
@@ -60,7 +52,7 @@ export default function AdminPricing() {
           Pricing
         </h1>
         <p className="mt-1 text-sm text-[#6B7280]">
-          Choose an Aaso plan. Projects, team size, and menu access follow the limits on the selected plan.
+          Choose an Aaso plan. Paid plans open Razorpay and start after the payment succeeds. Projects, team size, and menu access follow the limits on the selected plan.
         </p>
       </div>
 
@@ -109,6 +101,7 @@ export default function AdminPricing() {
           {visiblePlans.map((plan) => {
             const selected = plan.slug === currentSlug;
             const featured = isPopularPlan(plan);
+            const pending = pendingSlug === plan.slug;
             return (
               <PlanPricingCard
                 key={plan.slug}
@@ -118,8 +111,28 @@ export default function AdminPricing() {
                 action={
                   <button
                     type="button"
-                    disabled={selected || select.isPending}
-                    onClick={() => select.mutate({ slug: plan.slug })}
+                    disabled={selected || pendingSlug != null}
+                    onClick={() => {
+                      setPendingSlug(plan.slug);
+                      void completePlanCheckout(
+                        plan.slug,
+                        (input) => beginCheckout.mutateAsync(input),
+                        (proof) => confirmPayment.mutateAsync(proof),
+                      )
+                        .then(async (result) => {
+                          await Promise.all([
+                            utils.auth.me.invalidate(),
+                            utils.subscription.current.invalidate(),
+                            utils.subscription.plans.invalidate(),
+                          ]);
+                          toast.success(`${result.planName ?? "Plan"} is now active`);
+                        })
+                        .catch((error: unknown) => {
+                          if (error instanceof RazorpayCheckoutClosed) return;
+                          toast.error(error instanceof Error ? error.message : "Payment could not be completed");
+                        })
+                        .finally(() => setPendingSlug(null));
+                    }}
                     className={cn(
                       "inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl text-sm font-semibold disabled:opacity-60",
                       selected
@@ -129,10 +142,8 @@ export default function AdminPricing() {
                           : "border border-[#2563EB] bg-white text-[#2563EB] hover:bg-[#EEF4FF] dark:bg-transparent dark:text-blue-200",
                     )}
                   >
-                    {select.isPending && select.variables?.slug === plan.slug ? (
-                      <Loader2 size={16} className="animate-spin" />
-                    ) : null}
-                    {selected ? "Current plan" : plan.ctaLabel || "Select plan"}
+                    {pending ? <Loader2 size={16} className="animate-spin" /> : null}
+                    {selected ? "Current plan" : plan.amount > 0 ? "Pay now" : plan.ctaLabel || "Select plan"}
                   </button>
                 }
               />

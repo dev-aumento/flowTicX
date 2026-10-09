@@ -409,9 +409,18 @@ html.dark textarea::placeholder {
   color: var(--dm-text-soft);
 }
 
-/* Staff, finance, and platform sidebars. Client portal does not use this class. */
+html.dark input.bg-transparent {
+  background-color: transparent !important;
+  border-color: transparent !important;
+}
+
+html.dark input::placeholder,
+html.dark textarea::placeholder {
+  color: var(--dm-text-soft);
+}
+
 .sidebar-chrome,
-html.dark .sidebar-chrome {
+.portal-slate-gradient {
   background-color: #242629e5 !important;
   background-image: none !important;
 }
@@ -420,11 +429,6 @@ html.dark .sidebar-chrome {
   border-right: 1px solid #1e293b;
 }
 
-.portal-slate-gradient {
-  background-color: #242629e5;
-}
-
-/* Dark mode: hero boxes stay visible on the charcoal page */
 html.dark .portal-slate-gradient {
   background-color: #151c2c !important;
   background-image: linear-gradient(

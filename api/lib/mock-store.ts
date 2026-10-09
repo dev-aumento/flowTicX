@@ -791,6 +791,7 @@ export function mockTaskList(
     result = result.filter((t) => taskMatchesUnifiedSearch(t, input.search!, ctx));
   }
   const limit = input?.limit ?? 50;
+  result.sort((a, b) => (a.position - b.position) || (b.createdAt.getTime() - a.createdAt.getTime()));
   return {
     tasks: result.slice(0, limit).map((t) => {
       const project = t.projectId ? projects.find((p) => p.id === t.projectId) : null;
@@ -2369,6 +2370,21 @@ export function mockUpdateTask(
   }
   task.updatedAt = new Date();
   return task;
+}
+
+export function mockReorderTasks(
+  items: { id: number; position: number; stage?: string }[],
+  actor: SafeUser,
+) {
+  for (const item of items) {
+    const task = tasks.find((entry) => entry.id === item.id);
+    if (!task) continue;
+    task.position = item.position;
+    if (item.stage && item.stage !== task.stage) {
+      mockUpdateTask(item.id, { stage: item.stage }, actor);
+    }
+  }
+  return { ok: true as const };
 }
 
 export function mockUpdateStatus(id: number, status: string, actor: SafeUser) {

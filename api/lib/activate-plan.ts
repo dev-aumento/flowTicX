@@ -14,6 +14,8 @@ export async function activateOrganizationPlan(input: {
   org: OrganizationDoc;
   slug: string;
   actorId: number | null;
+  /** Set when Razorpay has confirmed the charge for this activation. */
+  paymentConfirmed?: boolean;
 }) {
   if (!hasMongoConfigured()) {
     throw new TRPCError({
@@ -31,7 +33,7 @@ export async function activateOrganizationPlan(input: {
   const startsAt = now;
   const expiresAt = addPlanDuration(startsAt, catalog.slug, catalog.durationDays);
   const isTrial = catalog.slug === "trial" || catalog.amount === 0;
-  const planStatus = isTrial ? "trial" : input.org.planStatus === "paid" ? "paid" : "unpaid";
+  const planStatus = isTrial ? "trial" : input.paymentConfirmed ? "paid" : input.org.planStatus === "paid" ? "paid" : "unpaid";
 
   const updated = await updateById<OrganizationDoc>(Collections.organizations, input.org.id, {
     plan: catalog.slug,

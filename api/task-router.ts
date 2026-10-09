@@ -295,7 +295,7 @@ export const taskRouter = createRouter({
 
       const taskCol = await getCollection<TaskDoc>(Collections.tasks);
       const [allTasks, total] = await Promise.all([
-        taskCol.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).toArray(),
+        taskCol.find(filter).sort({ position: 1, createdAt: -1 }).skip(skip).limit(limit).toArray(),
         countDocs(Collections.tasks, filter),
       ]);
 
@@ -1075,6 +1075,89 @@ export const taskRouter = createRouter({
       }
 
       return updated;
+    }),
+
+  reorder: authedQuery
+    .input(z.object({
+      items: z.array(z.object({
+        id: z.number().int().positive(),
+        position: z.number().int().min(0).max(100000),
+        stage: projectStageSchema.optional(),
+      })).min(1).max(500),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const seen = new Set<number>();
+      for (const item of input.items) {
+        if (seen.has(item.id)) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Duplicate task in reorder" });
+        }
+        seen.add(item.id);
+      }
+
+      if (useTaskMock()) return mock.mockReorderTasks(input.items, ctx.user);
+
+      await ensureSchema();
+      const now = new Date();
+      const loaded: { item: (typeof input.items)[number]; oldTask: TaskDoc }[] = [];
+      for (const item of input.items) {
+        const oldTask = await findById<TaskDoc>(Collections.tasks, item.id);
+        if (!oldTask || !belongsToUserOrg(ctx.user, oldTask.organizationId)) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Task not found" });
+        }
+        loaded.push({ item, oldTask });
+      }
+
+      for (const { item, oldTask } of loaded) {
+        const patch: Partial<TaskDoc> = { position: item.position };
+        const stageChanged = Boolean(item.stage && item.stage !== oldTask.stage);
+        if (stageChanged && item.stage) {
+          patch.stage = item.stage;
+          patch.updatedAt = now;
+          if (item.stage === "finished") {
+            patch.status = "done";
+            patch.assigneeId = null;
+          } else if (oldTask.status === "done") {
+            patch.status = "in_progress";
+          }
+        }
+
+        await updateById<TaskDoc>(Collections.tasks, item.id, patch);
+
+        if (stageChanged && item.stage) {
+          const label = actorLabel(ctx.user);
+          const taskTitle = oldTask.title;
+          await insertDoc<TaskActivityDoc>(Collections.taskActivity, {
+            taskId: item.id,
+            userId: ctx.user.id,
+            action: "stage_changed",
+            oldValue: oldTask.stage,
+            newValue: item.stage,
+            metadata: null,
+            createdAt: now,
+          });
+          if (!isMarkingTaskComplete({ stage: item.stage }) || isCompletedTask(oldTask)) {
+            await notifyTaskMembers({
+              taskId: item.id,
+              actor: ctx.user,
+              type: "task_updated",
+              title: "Task stage changed",
+              message: `${label} moved "${taskTitle}" to ${item.stage}`,
+            });
+          } else {
+            await notifyTaskMembers({
+              taskId: item.id,
+              actor: ctx.user,
+              type: "task_updated",
+              title: "Task marked finished",
+              message: `${label} marked "${taskTitle}" as finished`,
+              extraRecipientIds: oldTask.assigneeId != null ? [oldTask.assigneeId] : [],
+              includeParticipants: true,
+            });
+          }
+        }
+      }
+
+      return { ok: true as const };
     }),
 
   delete: authedQuery

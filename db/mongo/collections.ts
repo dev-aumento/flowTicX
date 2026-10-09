@@ -2,6 +2,7 @@ export const Collections = {
   counters: "counters",
   organizations: "organizations",
   subscriptionPlans: "subscription_plans",
+  subscriptionCheckouts: "subscription_checkouts",
   users: "users",
   employees: "employees",
   employeeInvites: "employee_invites",

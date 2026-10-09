@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { trpc } from "@/providers/trpc";
 import { UserAvatar } from "@/components/shared/UserAvatar";
 import {
@@ -17,7 +18,6 @@ import { AnimatePresence, motion } from "framer-motion";
 import { EdgeScrollArea } from "@/components/shared/EdgeScrollArea";
 import { formatKanbanDueLabel } from "@/lib/task-deadline";
 import { invalidateProjectStats } from "@/lib/project-stats";
-import { applyOptimisticTaskUpdate } from "@/lib/task-cache";
 import { refreshDashboardStats } from "@/lib/dashboard-refresh";
 import { taskLocateHighlightClass } from "@/hooks/useLocateTaskInView";
 import { cn } from "@/lib/utils";
@@ -28,11 +28,21 @@ import { extractTaskTags } from "@/lib/task-tags";
 import { isCompletedTask } from "@/lib/task-kanban";
 import {
   isPipelineStageDeletable,
+  taskBelongsToPipelineColumn,
   tasksForPipelineColumn,
   withOrphanPipelineStages,
   type PipelineStageDef,
   type ProjectPipelineStageKey,
 } from "@/lib/task-kanban";
+import {
+  applyKanbanReorder,
+  columnKeyAtPoint,
+  columnScrollDelta,
+  dropIndexInColumn,
+  reorderColumnIds,
+  sortKanbanTasks,
+  type KanbanReorderItem,
+} from "@/lib/kanban-dnd";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -54,6 +64,7 @@ type KanbanTask = {
   metadata?: unknown;
   subtaskCount?: number | null;
   completedSubtaskCount?: number | null;
+  position?: number | null;
 };
 
 const KANBAN_PRIORITY: Record<string, { label: string; className: string }> = {
@@ -83,16 +94,14 @@ function KanbanTaskCard({
   columnColor,
   draggedTask,
   isHighlighted,
-  onDragStart,
-  onDragEnd,
+  onPointerDown,
   onClick,
 }: {
   task: KanbanTask;
   columnColor: string;
   draggedTask: number | null;
   isHighlighted?: boolean;
-  onDragStart: (e: React.DragEvent) => void;
-  onDragEnd: () => void;
+  onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => void;
   onClick: () => void;
 }) {
   const { user } = useAuth();
@@ -109,13 +118,15 @@ function KanbanTaskCard({
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.95 }}
       transition={{ duration: 0.2 }}
-      className={cn(draggedTask === task.id && "opacity-50", isHighlighted && taskLocateHighlightClass)}
+      data-kanban-card={task.id}
+      className={cn(
+        draggedTask === task.id && "opacity-40",
+        isHighlighted && taskLocateHighlightClass,
+      )}
     >
       <div
-        draggable
         data-task-locate-id={task.id}
-        onDragStart={onDragStart}
-        onDragEnd={onDragEnd}
+        onPointerDown={onPointerDown}
         onClick={onClick}
         className="bg-white rounded-xl px-3.5 py-3 cursor-grab active:cursor-grabbing border border-gray-100/80 shadow-[0_1px_2px_rgba(15,23,42,0.05)] hover:shadow-[0_4px_10px_rgba(15,23,42,0.08)] transition-shadow"
       >
@@ -267,8 +278,26 @@ export function TaskKanbanBoard({
   const orgStages = useOrgPipelineStages();
   const stages = stagesProp && stagesProp.length > 0 ? stagesProp : orgStages;
   const [draggedTask, setDraggedTask] = useState<number | null>(null);
+  const [dragGhost, setDragGhost] = useState<{
+    title: string;
+    x: number;
+    y: number;
+    offsetX: number;
+    offsetY: number;
+  } | null>(null);
   const didDragRef = useRef(false);
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
+  const [placedTasks, setPlacedTasks] = useState<KanbanTask[] | null>(null);
+  const [columnOrder, setColumnOrder] = useState<Record<string, number[]> | null>(null);
+  const columnOrderRef = useRef<Record<string, number[]> | null>(null);
+  columnOrderRef.current = columnOrder;
+  const dragOriginRef = useRef<{ columnKey: string; ids: number[] } | null>(null);
+  const placedTasksRef = useRef<KanbanTask[] | null>(null);
+  placedTasksRef.current = placedTasks;
+  const dragSnapshotRef = useRef<{
+    columnOrder: Record<string, number[]> | null;
+    placedTasks: KanbanTask[] | null;
+  } | null>(null);
   const [isAddingSection, setIsAddingSection] = useState(false);
   const [newSectionLabel, setNewSectionLabel] = useState("");
   const newSectionInputRef = useRef<HTMLInputElement>(null);
@@ -276,25 +305,71 @@ export function TaskKanbanBoard({
   const [editingLabel, setEditingLabel] = useState("");
   const renameInputRef = useRef<HTMLInputElement>(null);
   const [collapsedKeys, setCollapsedKeys] = useState<Set<string>>(new Set());
+  const boardRef = useRef<HTMLDivElement>(null);
+  const ghostRef = useRef<HTMLDivElement>(null);
+  const dragSessionRef = useRef<{
+    pointerId: number;
+    taskId: number;
+    title: string;
+    startX: number;
+    startY: number;
+    x: number;
+    y: number;
+    cardLeft: number;
+    cardTop: number;
+    cardHeight: number;
+    active: boolean;
+    frame: number;
+  } | null>(null);
+
+  const boardTasks = placedTasks ?? tasks;
+  const boardTasksRef = useRef(boardTasks);
+  boardTasksRef.current = boardTasks;
+  const dragListenersRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => () => {
+    dragListenersRef.current?.();
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+  }, []);
+
+  useEffect(() => {
+    if (!columnOrder || dragSessionRef.current?.active) return;
+    const order = new Map(tasks.map((task, index) => [task.id, index]));
+    const synced = Object.entries(columnOrder).every(([key, ids]) => {
+      const serverIds = sortKanbanTasks(tasksForPipelineColumn(tasks, key), order).map((task) => task.id);
+      return serverIds.length === ids.length && serverIds.every((id, index) => id === ids[index]);
+    });
+    if (synced) {
+      setColumnOrder(null);
+      setPlacedTasks(null);
+    }
+  }, [tasks, columnOrder]);
 
   const utils = trpc.useUtils();
 
   const listInput =
     listQueryInput ?? (projectId ? { projectId, limit: 200 } : { limit: 200 });
 
-  const updateMutation = trpc.task.update.useMutation({
+  const reorderMutation = trpc.task.reorder.useMutation({
     onMutate: async (input) => {
-      const current = tasks.find((task) => task.id === input.id);
-      if (!current) return {};
+      await utils.task.list.cancel();
       const previous = utils.task.list.getData(listInput);
-      await applyOptimisticTaskUpdate(utils, current, input);
+      utils.task.list.setData(listInput, (current) => {
+        if (!current) return current;
+        return {
+          ...current,
+          tasks: applyKanbanReorder(current.tasks as KanbanTask[], input.items) as typeof current.tasks,
+        };
+      });
       return { previous };
     },
     onError: (_err, _input, context) => {
+      setColumnOrder(null);
+      setPlacedTasks(null);
       if (context?.previous) {
         utils.task.list.setData(listInput, context.previous);
       }
-      void refreshDashboardStats(utils);
     },
     onSettled: async () => {
       await Promise.all([
@@ -305,37 +380,6 @@ export function TaskKanbanBoard({
       invalidateProjectStats(utils, projectId);
     },
   });
-
-  const handleDragStart = (e: React.DragEvent, taskId: number) => {
-    e.stopPropagation();
-    didDragRef.current = true;
-    setDraggedTask(taskId);
-  };
-
-  const handleDragOver = (e: React.DragEvent, columnKey: string) => {
-    e.preventDefault();
-    setDragOverColumn(columnKey);
-  };
-
-  const handleDrop = (e: React.DragEvent, columnKey: string) => {
-    e.preventDefault();
-    if (draggedTask) {
-      updateMutation.mutate({
-        id: draggedTask,
-        stage: columnKey,
-      });
-    }
-    setDraggedTask(null);
-    setDragOverColumn(null);
-  };
-
-  const handleDragEnd = () => {
-    setDraggedTask(null);
-    setDragOverColumn(null);
-    requestAnimationFrame(() => {
-      didDragRef.current = false;
-    });
-  };
 
   const submitNewSection = async () => {
     const label = newSectionLabel.trim();
@@ -357,19 +401,308 @@ export function TaskKanbanBoard({
     setEditingLabel("");
   };
 
-  const tasksByColumn = (columnKey: string) => tasksForPipelineColumn(tasks, columnKey);
+  const listOrder = useMemo(
+    () => new Map(boardTasks.map((task, index) => [task.id, index])),
+    [boardTasks],
+  );
 
-  const columns = withOrphanPipelineStages(stages, tasks);
+  const tasksByColumn = (columnKey: string) => {
+    const sorted = sortKanbanTasks(tasksForPipelineColumn(boardTasks, columnKey), listOrder);
+    const ids = columnOrder?.[columnKey];
+    if (!ids?.length) return sorted;
+    const byId = new Map(sorted.map((task) => [task.id, task]));
+    const ordered: KanbanTask[] = [];
+    const seen = new Set<number>();
+    for (const id of ids) {
+      const task = byId.get(id);
+      if (!task || seen.has(id)) continue;
+      seen.add(id);
+      ordered.push(task);
+    }
+    for (const task of sorted) {
+      if (!seen.has(task.id)) ordered.push(task);
+    }
+    return ordered;
+  };
+
+  const columns = withOrphanPipelineStages(stages, boardTasks);
 
   const columnCounts = useMemo(
-    () => columns.map((column) => ({ ...column, count: tasksForPipelineColumn(tasks, column.key).length })),
-    [columns, tasks],
+    () => columns.map((column) => ({ ...column, count: tasksForPipelineColumn(boardTasks, column.key).length })),
+    [columns, boardTasks],
   );
 
   const completePercent = useMemo(() => {
-    if (tasks.length === 0) return 0;
-    return Math.round((tasks.filter(isCompletedTask).length / tasks.length) * 100);
-  }, [tasks]);
+    if (boardTasks.length === 0) return 0;
+    return Math.round((boardTasks.filter(isCompletedTask).length / boardTasks.length) * 100);
+  }, [boardTasks]);
+
+  const clearDragVisual = () => {
+    const session = dragSessionRef.current;
+    if (session) cancelAnimationFrame(session.frame);
+    dragSessionRef.current = null;
+    dragOriginRef.current = null;
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    setDraggedTask(null);
+    setDragGhost(null);
+    setDragOverColumn(null);
+  };
+
+  const scrollColumnsAtPointer = (clientX: number, clientY: number) => {
+    const board = boardRef.current;
+    if (!board) return;
+    const scrollers = board.querySelectorAll<HTMLElement>("[data-kanban-column-scroll]");
+    for (const el of scrollers) {
+      // Scroll when the pointer or the card hanging below it reaches the edge.
+      const delta = columnScrollDelta(el, clientX, clientY) || columnScrollDelta(el, clientX, clientY + 56);
+      if (delta === 0) continue;
+      const max = el.scrollHeight - el.clientHeight;
+      el.scrollTop = Math.min(max, Math.max(0, el.scrollTop + delta));
+      break;
+    }
+  };
+
+  const sameIds = (left: number[], right: number[]) =>
+    left.length === right.length && left.every((id, index) => id === right[index]);
+
+  const visualColumnIds = (columnKey: string) => {
+    const currentTasks = boardTasksRef.current;
+    const order = new Map(currentTasks.map((task, index) => [task.id, index]));
+    const sorted = sortKanbanTasks(tasksForPipelineColumn(currentTasks, columnKey), order);
+    const override = columnOrderRef.current?.[columnKey];
+    if (!override?.length) return sorted.map((task) => task.id);
+    const known = new Set(sorted.map((task) => task.id));
+    const ordered = override.filter((id) => known.has(id));
+    const seen = new Set(ordered);
+    for (const task of sorted) {
+      if (!seen.has(task.id)) ordered.push(task.id);
+    }
+    return ordered;
+  };
+
+  const columnKeyForTask = (taskId: number) => {
+    const orders = columnOrderRef.current;
+    if (orders) {
+      for (const [key, ids] of Object.entries(orders)) {
+        if (ids.includes(taskId)) return key;
+      }
+    }
+    const task = boardTasksRef.current.find((entry) => entry.id === taskId);
+    if (!task) return null;
+    const columnKeys = withOrphanPipelineStages(stages, boardTasksRef.current).map((column) => column.key);
+    return columnKeys.find((key) => taskBelongsToPipelineColumn(task, key)) ?? null;
+  };
+
+  const rememberColumnOrder = (next: Record<string, number[]>) => {
+    columnOrderRef.current = next;
+    setColumnOrder(next);
+  };
+
+  const moveDraggedTask = (taskId: number, clientX: number, clientY: number) => {
+    const board = boardRef.current;
+    const session = dragSessionRef.current;
+    if (!board || !session?.active) return;
+    const cardCenterY = clientY + (session.cardTop + session.cardHeight / 2 - session.startY);
+    const columnKey =
+      columnKeyAtPoint(board, clientX, cardCenterY) ??
+      columnKeyAtPoint(board, clientX, clientY);
+    if (!columnKey) return;
+    const columnEl = [...board.querySelectorAll<HTMLElement>("[data-kanban-column]")].find(
+      (el) => el.dataset.kanbanColumnKey === columnKey,
+    );
+    const scroll = columnEl?.querySelector<HTMLElement>("[data-kanban-column-scroll]");
+    const index = dropIndexInColumn(scroll, cardCenterY, taskId);
+    const sourceKey = columnKeyForTask(taskId) ?? columnKey;
+    const sourceIds = visualColumnIds(sourceKey);
+    const targetIds = sourceKey === columnKey ? sourceIds : visualColumnIds(columnKey);
+    const nextTargetIds = reorderColumnIds(targetIds, taskId, index);
+    const nextSourceIds = sourceKey === columnKey ? nextTargetIds : sourceIds.filter((id) => id !== taskId);
+    setDragOverColumn((prev) => (prev === columnKey ? prev : columnKey));
+    if (sameIds(nextTargetIds, targetIds) && sameIds(nextSourceIds, sourceIds)) return;
+
+    rememberColumnOrder({
+      ...(columnOrderRef.current ?? {}),
+      ...(sourceKey === columnKey ? {} : { [sourceKey]: nextSourceIds }),
+      [columnKey]: nextTargetIds,
+    });
+
+    if (sourceKey !== columnKey) {
+      const items: KanbanReorderItem[] = [
+        ...nextSourceIds.map((id, position) => ({ id, position })),
+        ...nextTargetIds.map((id, position) => ({
+          id,
+          position,
+          ...(id === taskId ? { stage: columnKey } : {}),
+        })),
+      ];
+      const placed = applyKanbanReorder(boardTasksRef.current, items);
+      boardTasksRef.current = placed;
+      setPlacedTasks(placed);
+    }
+  };
+
+  const persistDraggedTask = (taskId: number) => {
+    const origin = dragOriginRef.current;
+    dragOriginRef.current = null;
+    if (!origin) return;
+    const columnKey = columnKeyForTask(taskId) ?? origin.columnKey;
+    const ids = visualColumnIds(columnKey);
+    if (columnKey === origin.columnKey && sameIds(ids, origin.ids)) return;
+
+    const sourceIds = columnKey === origin.columnKey ? ids : visualColumnIds(origin.columnKey);
+    const items: KanbanReorderItem[] = columnKey === origin.columnKey
+      ? ids.map((id, position) => ({ id, position }))
+      : [
+          ...sourceIds.map((id, position) => ({ id, position })),
+          ...ids.map((id, position) => ({
+            id,
+            position,
+            ...(id === taskId ? { stage: columnKey } : {}),
+          })),
+        ];
+    const placed = applyKanbanReorder(boardTasksRef.current, items);
+    boardTasksRef.current = placed;
+    setPlacedTasks(placed);
+    reorderMutation.mutate({ items });
+  };
+
+  const moveDraggedTaskRef = useRef(moveDraggedTask);
+  const persistDraggedTaskRef = useRef(persistDraggedTask);
+  moveDraggedTaskRef.current = moveDraggedTask;
+  persistDraggedTaskRef.current = persistDraggedTask;
+
+  const beginPointerDrag = (event: React.PointerEvent<HTMLDivElement>, task: KanbanTask) => {
+    if (event.button !== 0) return;
+    const target = event.target as HTMLElement | null;
+    if (target?.closest("button, a, input, textarea, [role='menuitem']")) return;
+
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const cardRect = event.currentTarget.getBoundingClientRect();
+    const session = {
+      pointerId: event.pointerId,
+      taskId: task.id,
+      title: task.title,
+      startX: event.clientX,
+      startY: event.clientY,
+      x: event.clientX,
+      y: event.clientY,
+      cardLeft: cardRect.left,
+      cardTop: cardRect.top,
+      cardHeight: cardRect.height,
+      active: false,
+      frame: 0,
+    };
+    dragSessionRef.current = session;
+
+    const placeGhost = (x: number, y: number) => {
+      const ghost = ghostRef.current;
+      const current = dragSessionRef.current;
+      if (!ghost || !current) return;
+      const left = x - (current.startX - current.cardLeft);
+      const top = y - (current.startY - current.cardTop);
+      ghost.style.transform = `translate3d(${left}px, ${top}px, 0)`;
+    };
+
+    const tick = () => {
+      const current = dragSessionRef.current;
+      if (!current?.active) return;
+      scrollColumnsAtPointer(current.x, current.y);
+      moveDraggedTaskRef.current(current.taskId, current.x, current.y);
+      placeGhost(current.x, current.y);
+      current.frame = requestAnimationFrame(tick);
+    };
+
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      const current = dragSessionRef.current;
+      if (!current || moveEvent.pointerId !== current.pointerId) return;
+      current.x = moveEvent.clientX;
+      current.y = moveEvent.clientY;
+      if (!current.active) {
+        const distance = Math.hypot(moveEvent.clientX - current.startX, moveEvent.clientY - current.startY);
+        if (distance < 6) return;
+        current.active = true;
+        didDragRef.current = true;
+        document.body.style.cursor = "grabbing";
+        document.body.style.userSelect = "none";
+        const originColumn = columnKeyForTask(current.taskId);
+        dragOriginRef.current = originColumn
+          ? { columnKey: originColumn, ids: visualColumnIds(originColumn) }
+          : null;
+        dragSnapshotRef.current = {
+          columnOrder: columnOrderRef.current,
+          placedTasks: placedTasksRef.current,
+        };
+        setDraggedTask(current.taskId);
+        setDragGhost({
+          title: current.title,
+          x: moveEvent.clientX,
+          y: moveEvent.clientY,
+          offsetX: current.startX - current.cardLeft,
+          offsetY: current.startY - current.cardTop,
+        });
+        current.frame = requestAnimationFrame(tick);
+      }
+      placeGhost(moveEvent.clientX, moveEvent.clientY);
+    };
+
+    const finish = (endEvent: PointerEvent) => {
+      const current = dragSessionRef.current;
+      if (!current || endEvent.pointerId !== current.pointerId) return;
+      dragListenersRef.current?.();
+      dragListenersRef.current = null;
+      const wasActive = current.active;
+      const taskId = current.taskId;
+      current.x = endEvent.clientX;
+      current.y = endEvent.clientY;
+      cancelAnimationFrame(current.frame);
+      if (wasActive && endEvent.type !== "pointercancel") {
+        moveDraggedTaskRef.current(taskId, endEvent.clientX, endEvent.clientY);
+      }
+      dragSessionRef.current = null;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      if (!wasActive) {
+        dragSnapshotRef.current = null;
+        return;
+      }
+      persistDraggedTaskRef.current(taskId);
+      dragSnapshotRef.current = null;
+      clearDragVisual();
+      requestAnimationFrame(() => {
+        didDragRef.current = false;
+      });
+    };
+
+    const onKeyDown = (keyEvent: KeyboardEvent) => {
+      if (keyEvent.key !== "Escape") return;
+      dragListenersRef.current?.();
+      dragListenersRef.current = null;
+      const snapshot = dragSnapshotRef.current;
+      dragSnapshotRef.current = null;
+      if (snapshot) {
+        columnOrderRef.current = snapshot.columnOrder;
+        setColumnOrder(snapshot.columnOrder);
+        setPlacedTasks(snapshot.placedTasks);
+      }
+      clearDragVisual();
+      requestAnimationFrame(() => {
+        didDragRef.current = false;
+      });
+    };
+
+    const detach = () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+    dragListenersRef.current = detach;
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", finish);
+    window.addEventListener("keydown", onKeyDown);
+  };
 
   const submitRename = async () => {
     if (!editingColumnKey || !onRenameSection || renamingSection) return;
@@ -421,7 +754,7 @@ export function TaskKanbanBoard({
   }
 
   return (
-    <div className={cn("flex flex-col gap-3 min-h-0 h-[calc(100vh-12.5rem)]", className)}>
+    <div ref={boardRef} className={cn("flex flex-col gap-3 min-h-0 h-[calc(100vh-12.5rem)]", className)}>
       <div className="shrink-0 space-y-2.5">
         <div className="flex items-center gap-3">
           <div className="flex-1 h-1.5 rounded-full overflow-hidden bg-gray-200 flex">
@@ -459,7 +792,7 @@ export function TaskKanbanBoard({
       </div>
 
       <EdgeScrollArea className="flex-1 min-h-0 !overflow-y-hidden" showScrollbar>
-        <div className="flex gap-4 w-max min-w-full pb-2 items-start h-full">
+        <div className="flex gap-4 w-max min-w-full pb-2 items-stretch h-full min-h-0">
           {columns.map((column, columnIndex) => {
             const columnTasks = tasksByColumn(column.key);
             const isDragOver = dragOverColumn === column.key;
@@ -476,18 +809,13 @@ export function TaskKanbanBoard({
             return (
               <div
                 key={column.key}
+                data-kanban-column=""
+                data-kanban-column-key={column.key}
                 className={cn(
-                  "w-[280px] shrink-0 flex flex-col max-h-full overflow-hidden rounded-2xl px-2.5 pt-2 pb-2.5 transition-colors",
+                  "w-[280px] shrink-0 flex flex-col h-full min-h-0 max-h-full overflow-hidden rounded-2xl px-2.5 pt-2 pb-2.5 transition-colors",
                   "bg-[#F1F3F6] dark:!bg-[#1a2336]",
                   isDragOver && "ring-2 ring-[#2563EB]/35 bg-blue-50 dark:!bg-[#1a2740]",
                 )}
-                onDragOver={(e) => handleDragOver(e, column.key)}
-                onDrop={(e) => handleDrop(e, column.key)}
-                onDragLeave={(e) => {
-                  if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                    setDragOverColumn(null);
-                  }
-                }}
               >
                 <div className="group/header flex items-center gap-2 px-1 py-1.5 shrink-0">
                   <span
@@ -610,7 +938,10 @@ export function TaskKanbanBoard({
                 </div>
 
                 {!collapsed ? (
-                  <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain scrollbar-thin">
+                  <div
+                    data-kanban-column-scroll=""
+                    className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain scrollbar-thin"
+                  >
                     <div className="space-y-2">
                       <AnimatePresence mode="sync">
                         {columnTasks.map((task) => (
@@ -620,8 +951,7 @@ export function TaskKanbanBoard({
                             columnColor={column.color}
                             draggedTask={draggedTask}
                             isHighlighted={highlightedTaskId === task.id}
-                            onDragStart={(e) => handleDragStart(e, task.id)}
-                            onDragEnd={handleDragEnd}
+                            onPointerDown={(event) => beginPointerDrag(event, task)}
                             onClick={() => {
                               if (!didDragRef.current) onTaskClick(task.id);
                             }}
@@ -719,6 +1049,18 @@ export function TaskKanbanBoard({
           ) : null}
         </div>
       </EdgeScrollArea>
+      {dragGhost
+        ? createPortal(
+            <div
+              ref={ghostRef}
+              className="fixed left-0 top-0 z-[80] w-[248px] pointer-events-none rounded-xl border border-gray-200 bg-white px-3.5 py-3 text-[13px] font-semibold text-[#111827] shadow-[0_12px_28px_rgba(15,23,42,0.18)]"
+              style={{ transform: `translate3d(${dragGhost.x - dragGhost.offsetX}px, ${dragGhost.y - dragGhost.offsetY}px, 0)` }}
+            >
+              {dragGhost.title}
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

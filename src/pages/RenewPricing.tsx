@@ -14,11 +14,11 @@ import {
 } from "@/components/ui/carousel";
 import { BrandLogo } from "@/components/brand/BrandLogo";
 import {
-  detectPlanCurrency,
   planBillingInterval,
   sortPlansByPrice,
   type PlanBillingInterval,
 } from "@/lib/platform-admin";
+import { completePlanCheckout, RazorpayCheckoutClosed } from "@/lib/razorpay-checkout";
 import { isPopularPlan } from "@/lib/plan-entitlements";
 import { clearPlanEndedNotice } from "@/lib/plan-ended";
 import { writeAuthCache } from "@/lib/auth-cache";
@@ -49,34 +49,11 @@ export default function RenewPricing() {
   const contextQuery = trpc.subscription.renewContext.useQuery(undefined, {
     enabled: !authLoading && !loggedInAdmin,
   });
-  const renew = trpc.subscription.renew.useMutation({
-    onSuccess: async (result) => {
-      writeAuthCache(result.user);
-      utils.auth.me.setData(undefined, result.user);
-      clearPlanEndedNotice();
-      await utils.invalidate();
-      toast.success(`${result.planName ?? "Plan"} is now active`);
-      navigate(getDefaultHomePath(result.user), { replace: true });
-    },
-    onError: (error) => toast.error(error.message),
-  });
-  const select = trpc.subscription.selectPlan.useMutation({
-    onSuccess: async (result) => {
-      await Promise.all([
-        utils.auth.me.invalidate(),
-        utils.subscription.current.invalidate(),
-        utils.subscription.catalog.invalidate(),
-      ]);
-      toast.success(`${result.planName ?? "Plan"} is now active`);
-      navigate(returnTo, {
-        replace: true,
-        state: returnTo === "/settings" ? { tab: "plans" } : undefined,
-      });
-    },
-    onError: (error) => toast.error(error.message),
-  });
+  const beginCheckout = trpc.subscription.beginCheckout.useMutation();
+  const confirmPayment = trpc.subscription.confirmPayment.useMutation();
+  const [pendingSlug, setPendingSlug] = useState<string | null>(null);
 
-  const currency = detectPlanCurrency();
+  const currency = "INR" as const;
   const [interval, setInterval] = useState<PlanBillingInterval>("month");
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
   const [syncedInterval, setSyncedInterval] = useState(false);
@@ -110,28 +87,52 @@ export default function RenewPricing() {
   );
 
   function continueWith(slug: string) {
-    if (!canRenew || renew.isPending || select.isPending) return;
+    if (!canRenew || pendingSlug) return;
     setSelectedSlug(slug);
-    if (loggedInAdmin) {
-      if (slug === currentSlug) {
+    if (loggedInAdmin && slug === currentSlug) {
+      navigate(returnTo, {
+        replace: true,
+        state: returnTo === "/settings" ? { tab: "plans" } : undefined,
+      });
+      return;
+    }
+    setPendingSlug(slug);
+    void completePlanCheckout(
+      slug,
+      (input) => beginCheckout.mutateAsync(input),
+      (proof) => confirmPayment.mutateAsync(proof),
+    )
+      .then(async (result) => {
+        toast.success(`${result.planName ?? "Plan"} is now active`);
+        if (result.renewedSession && result.user) {
+          writeAuthCache(result.user);
+          utils.auth.me.setData(undefined, result.user);
+          clearPlanEndedNotice();
+          await utils.invalidate();
+          navigate(getDefaultHomePath(result.user), { replace: true });
+          return;
+        }
+        await Promise.all([
+          utils.auth.me.invalidate(),
+          utils.subscription.current.invalidate(),
+          utils.subscription.catalog.invalidate(),
+        ]);
         navigate(returnTo, {
           replace: true,
           state: returnTo === "/settings" ? { tab: "plans" } : undefined,
         });
-        return;
-      }
-      select.mutate({ slug });
-      return;
-    }
-    renew.mutate({ slug });
+      })
+      .catch((error: unknown) => {
+        if (error instanceof RazorpayCheckoutClosed) return;
+        toast.error(error instanceof Error ? error.message : "Payment could not be completed");
+      })
+      .finally(() => setPendingSlug(null));
   }
 
   function renderPlanCard(plan: (typeof visiblePlans)[number]) {
     const selected = plan.slug === selectedSlug;
     const featured = isPopularPlan(plan);
-    const pending =
-      (renew.isPending && renew.variables?.slug === plan.slug) ||
-      (select.isPending && select.variables?.slug === plan.slug);
+    const pending = pendingSlug === plan.slug;
     return (
       <PlanPricingCard
         plan={plan}
@@ -140,7 +141,7 @@ export default function RenewPricing() {
         action={
           <button
             type="button"
-            disabled={!canRenew || renew.isPending || select.isPending}
+            disabled={!canRenew || pendingSlug != null}
             onClick={() => continueWith(plan.slug)}
             className={cn(
               "inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl text-sm font-semibold disabled:opacity-60",
@@ -150,7 +151,7 @@ export default function RenewPricing() {
             )}
           >
             {pending ? <Loader2 size={16} className="animate-spin" /> : null}
-            Continue with this plan
+            {plan.amount > 0 ? "Continue with this plan" : "Continue with this plan"}
           </button>
         }
       />
@@ -182,7 +183,7 @@ export default function RenewPricing() {
             {context?.organizationName
               ? `Choose a monthly or yearly plan for ${context.organizationName}. `
               : "Choose a monthly or yearly plan. "}
-            The tools you can use follow the features included in the plan you select.
+            Paid plans are charged in INR through Razorpay and start after the payment succeeds. The tools you can use follow the features included in the plan you select.
           </p>
           {!authLoading && !loggedInAdmin && contextQuery.isSuccess && !canRenew ? (
             <p className="text-sm text-amber-800">

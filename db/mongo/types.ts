@@ -211,6 +211,23 @@ export type SubscriptionPlanDoc = {
   updatedAt: Date;
 };
 
+/** Razorpay order created before a workspace plan is marked paid. */
+export type SubscriptionCheckoutDoc = {
+  id: number;
+  organizationId: number;
+  userId: number;
+  planSlug: string;
+  amountPaise: number;
+  currency: "INR";
+  razorpayOrderId: string;
+  razorpayPaymentId: string | null;
+  status: "created" | "paid";
+  /** Issue a fresh sign-in after payment when the previous plan had already ended. */
+  restoreSession: boolean;
+  createdAt: Date;
+  paidAt: Date | null;
+};
+
 export type UserDoc = {
   id: number;
   /** Tenant this user belongs to. Null only for legacy rows before migration. */
