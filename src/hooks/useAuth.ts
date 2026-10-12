@@ -124,7 +124,7 @@ export function useAuth(_options?: UseAuthOptions) {
       writeAuthCache(result.user);
       utils.auth.me.setData(undefined, result.user);
       await utils.invalidate();
-      navigate(getDefaultHomePath(result.user));
+      navigate(result.needsPlanChoice ? "/pricing" : getDefaultHomePath(result.user));
     },
   });
 
@@ -193,6 +193,7 @@ export function useAuth(_options?: UseAuthOptions) {
           ],
           portal: null as "client" | "finance" | "platform" | null,
           inactive: false,
+          needsRegistration: false,
         });
       }
       return lookupWorkspacesMutation.mutateAsync({ email });
@@ -247,9 +248,14 @@ export function useAuth(_options?: UseAuthOptions) {
       email: string;
       password: string;
       organizationName: string;
+      planSlug?: string;
     }) => {
       if (AUTH_DISABLED) {
-        return Promise.resolve({ user: DEV_USER, organizationName: input.organizationName });
+        return Promise.resolve({
+          user: DEV_USER,
+          organizationName: input.organizationName,
+          needsPlanChoice: false,
+        });
       }
       return registerAdminMutation.mutateAsync(input);
     },

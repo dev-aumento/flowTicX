@@ -98,3 +98,41 @@ export async function createRazorpayOrder(input: {
     currency: body.currency || "INR",
   };
 }
+
+export type RazorpayPayment = {
+  id: string;
+  orderId: string;
+  email: string;
+  contact: string;
+  amount: number;
+  status: string;
+};
+
+/** Reads the email the buyer entered in Razorpay Checkout. */
+export async function fetchRazorpayPayment(keys: RazorpayKeys, paymentId: string): Promise<RazorpayPayment> {
+  const auth = Buffer.from(`${keys.keyId}:${keys.keySecret}`).toString("base64");
+  const response = await fetch(`https://api.razorpay.com/v1/payments/${encodeURIComponent(paymentId)}`, {
+    headers: { Authorization: `Basic ${auth}` },
+  });
+  const body = (await response.json().catch(() => null)) as {
+    id?: string;
+    order_id?: string;
+    email?: string;
+    contact?: string;
+    amount?: number;
+    status?: string;
+    error?: { description?: string };
+  } | null;
+  if (!response.ok || !body?.id) {
+    const description = body?.error?.description?.trim();
+    throw new Error(description || "Razorpay could not confirm this payment.");
+  }
+  return {
+    id: body.id,
+    orderId: body.order_id ?? "",
+    email: String(body.email ?? "").trim().toLowerCase(),
+    contact: String(body.contact ?? "").replace(/[^\d]/g, ""),
+    amount: typeof body.amount === "number" ? body.amount : 0,
+    status: body.status ?? "",
+  };
+}

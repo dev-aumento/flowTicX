@@ -4,9 +4,14 @@ import { createRouter, adminQuery, authedQuery, publicQuery } from "./middleware
 import { findOrganizationById, requireOrganizationId } from "./lib/tenant";
 import { findPlatformPlan, listPlatformPlans } from "./lib/platform-plans";
 import { addPlanDuration } from "@/lib/platform-admin";
-import { resolveOrgPlanAccess, settleIntroEnterprise } from "./lib/subscription-access";
+import {
+  canStartIntroPlanTrial,
+  effectivePlanDurationDays,
+  resolveOrgPlanAccess,
+  settleIntroEnterprise,
+} from "./lib/subscription-access";
 import { isFreeTierPlan, planDaysRemaining, planExpiryWarning } from "./lib/plan-expiry";
-import { activateOrganizationPlan } from "./lib/activate-plan";
+import { activateOrganizationPlan, startSelectedPlanTrial } from "./lib/activate-plan";
 import { clearPlanRenewalCookie, userFromPlanRenewalCookie } from "./lib/plan-renewal";
 import { createSessionForUser } from "./lib/auth";
 import { toSessionUser } from "./lib/client-workspace";
@@ -16,6 +21,7 @@ import {
   assertComplimentaryPlan,
   fulfillSubscriptionCheckout,
   resolvePlanPayer,
+  startGuestCheckout,
   startSubscriptionCheckout,
 } from "./lib/subscription-checkout";
 
@@ -50,23 +56,27 @@ export const subscriptionRouter = createRouter({
     const access = await resolveOrgPlanAccess(settled);
     const catalog = access.plan ? await findPlatformPlan(access.plan) : null;
     const planStartsAt = settled.planStartsAt ?? settled.purchasedAt ?? settled.createdAt ?? null;
+    const durationDays = effectivePlanDurationDays(settled, catalog?.durationDays) ?? null;
     const planExpiresAt = planStartsAt
-      ? addPlanDuration(new Date(planStartsAt), settled.plan ?? "trial", catalog?.durationDays)
+      ? addPlanDuration(new Date(planStartsAt), settled.plan ?? "trial", durationDays ?? undefined)
       : settled.planExpiresAt ?? null;
     const daysRemaining =
       planExpiresAt && !isFreeTierPlan(settled.plan)
         ? planDaysRemaining(new Date(planExpiresAt))
         : null;
     const introEnterprise = Boolean(settled.introEnterprise);
+    const introPlanTrial = Boolean(settled.introPlanTrial);
+    const complimentary = introEnterprise || introPlanTrial;
     return {
       organizationId,
       organizationName: settled.name,
       ...access,
       introEnterprise,
-      subscriptionAmount: introEnterprise ? 0 : settled.subscriptionAmount ?? catalog?.amount ?? 0,
+      introPlanTrial,
+      subscriptionAmount: complimentary ? 0 : settled.subscriptionAmount ?? catalog?.amount ?? 0,
       planStartsAt,
       planExpiresAt,
-      durationDays: catalog?.durationDays ?? null,
+      durationDays,
       daysRemaining,
       expiryWarning: planExpiryWarning(daysRemaining),
     };
@@ -89,10 +99,26 @@ export const subscriptionRouter = createRouter({
     .mutation(async ({ ctx, input }) => {
       const payer = await resolvePlanPayer(ctx);
       if (!payer) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Sign in as the workspace super admin to pay for a plan.",
+        const started = await startGuestCheckout(input.slug);
+        return {
+          requiresPayment: true as const,
+          keyId: started.keyId,
+          orderId: started.orderId,
+          amount: started.amount,
+          currency: started.currency,
+          name: started.name,
+          description: started.description,
+          prefill: started.prefill,
+        };
+      }
+
+      if (canStartIntroPlanTrial(payer.org)) {
+        const plan = await startSelectedPlanTrial({
+          org: payer.org,
+          slug: input.slug,
+          actorId: payer.user.id,
         });
+        return attachRenewalSession(ctx, payer.user.id, payer.restoreSession, plan);
       }
 
       const started = await startSubscriptionCheckout({ payer, slug: input.slug });
@@ -142,13 +168,25 @@ export const subscriptionRouter = createRouter({
         orderId: input.orderId,
         paymentId: input.paymentId,
       });
-      const sameAdmin = payer?.user.id === fulfilled.checkout.userId;
-      return attachRenewalSession(
+      if (fulfilled.account) {
+        return {
+          requiresPayment: false as const,
+          renewedSession: false,
+          ...fulfilled.plan,
+          user: null,
+          token: null,
+          accountEmail: fulfilled.account.email,
+          accountNext: fulfilled.account.hasPassword ? ("login" as const) : ("register" as const),
+        };
+      }
+      const sameAdmin = payer != null && payer.user.id === fulfilled.checkout.userId;
+      const session = await attachRenewalSession(
         ctx,
-        fulfilled.checkout.userId,
+        fulfilled.checkout.userId ?? payer?.user.id ?? 0,
         Boolean(sameAdmin && fulfilled.checkout.restoreSession),
         fulfilled.plan,
       );
+      return { ...session, accountEmail: null, accountNext: null as null };
     }),
 
   renew: publicQuery
@@ -202,6 +240,8 @@ async function attachRenewalSession(
       ...plan,
       user: null,
       token: null,
+      accountEmail: null,
+      accountNext: null as null,
     };
   }
 
@@ -217,5 +257,7 @@ async function attachRenewalSession(
     ...plan,
     user: await toSessionUser(user),
     token,
+    accountEmail: null,
+    accountNext: null as null,
   };
 }

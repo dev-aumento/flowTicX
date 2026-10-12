@@ -12,7 +12,6 @@ import {
   statusLabel,
   type PlanBillingInterval,
 } from "@/lib/platform-admin";
-import { isPopularPlan } from "@/lib/plan-entitlements";
 import { PlanPricingCard } from "@/components/billing/PlanPricingCard";
 import { PlanIntervalTabs } from "@/components/billing/PlanIntervalTabs";
 import { completePlanCheckout, RazorpayCheckoutClosed } from "@/lib/razorpay-checkout";
@@ -100,7 +99,6 @@ export default function AdminPricing() {
         <div className="grid items-stretch gap-5 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
           {visiblePlans.map((plan) => {
             const selected = plan.slug === currentSlug;
-            const featured = isPopularPlan(plan);
             const pending = pendingSlug === plan.slug;
             return (
               <PlanPricingCard
@@ -125,7 +123,11 @@ export default function AdminPricing() {
                             utils.subscription.current.invalidate(),
                             utils.subscription.plans.invalidate(),
                           ]);
-                          toast.success(`${result.planName ?? "Plan"} is now active`);
+                          toast.success(
+                            result.planStatus === "trial"
+                              ? `Your 1 month free trial of ${result.planName ?? "this plan"} has started`
+                              : `${result.planName ?? "Plan"} is now active`,
+                          );
                         })
                         .catch((error: unknown) => {
                           if (error instanceof RazorpayCheckoutClosed) return;
@@ -137,13 +139,11 @@ export default function AdminPricing() {
                       "inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl text-sm font-semibold disabled:opacity-60",
                       selected
                         ? "border border-[#E6E8EC] bg-white text-[#6B7280] dark:border-[#334155] dark:bg-[#1E293B] dark:text-slate-300"
-                        : featured
-                          ? "bg-[#2563EB] text-white hover:bg-[#1D4ED8]"
-                          : "border border-[#2563EB] bg-white text-[#2563EB] hover:bg-[#EEF4FF] dark:bg-transparent dark:text-blue-200",
+                        : "border border-[#2563EB] bg-white text-[#2563EB] hover:bg-[#EEF4FF] dark:bg-transparent dark:text-blue-200",
                     )}
                   >
                     {pending ? <Loader2 size={16} className="animate-spin" /> : null}
-                    {selected ? "Current plan" : plan.amount > 0 ? "Pay now" : plan.ctaLabel || "Select plan"}
+                    {selected ? "Current plan" : "Continue with this plan"}
                   </button>
                 }
               />

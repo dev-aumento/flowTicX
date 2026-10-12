@@ -56,6 +56,33 @@ export async function resolveOrgPlanAccess(
   };
 }
 
+/** First month of a customer-chosen plan. Not the catalog billing period. */
+export const INTRO_TRIAL_DAYS = 30;
+
+export function effectivePlanDurationDays(
+  org: { introPlanTrial?: boolean | null },
+  catalogDuration?: number | null,
+) {
+  if (org.introPlanTrial) return INTRO_TRIAL_DAYS;
+  return catalogDuration ?? undefined;
+}
+
+export function introTrialStillOpen(org: OrganizationDoc) {
+  if (!org.introPlanTrial) return false;
+  const start = org.planStartsAt ?? org.purchasedAt ?? org.createdAt;
+  if (!start) return false;
+  const expires = addPlanDuration(new Date(start), org.plan ?? "trial", INTRO_TRIAL_DAYS);
+  return endOfPlanDay(expires).getTime() >= Date.now();
+}
+
+/** The first chosen plan is free for one month. A paid workspace, or a finished trial, must pay. */
+export function canStartIntroPlanTrial(org: OrganizationDoc) {
+  if (org.workspaceType === "platform") return false;
+  if (org.planStatus === "paid" || org.introEnterprise) return false;
+  if (!org.introPlanTrial) return true;
+  return introTrialStillOpen(org);
+}
+
 export function subscriptionExpiryDate(org: OrganizationDoc, durationDays?: number) {
   const plan = org.plan ?? "trial";
   const start = org.planStartsAt ?? org.purchasedAt ?? org.createdAt;
@@ -118,7 +145,7 @@ export async function getSubscriptionBlock(
 
   const org = await settleIntroEnterprise(loaded);
   const catalog = await findPlatformPlan(org.plan ?? "trial");
-  return subscriptionBlockReason(org, catalog?.durationDays);
+  return subscriptionBlockReason(org, effectivePlanDurationDays(org, catalog?.durationDays));
 }
 
 export function subscriptionBlockError(reason: "expired" | "cancelled") {

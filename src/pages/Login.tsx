@@ -82,12 +82,17 @@ export default function Login() {
   const resetEmail = searchParams.get("email")?.trim().toLowerCase() ?? "";
   const resetCode = searchParams.get("code")?.trim() ?? "";
   const openedFromResetLink = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(resetEmail) && /^\d{6}$/.test(resetCode);
+  const paidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(resetEmail) ? resetEmail : "";
+  const signup = searchParams.get("signup");
+  const selectedPlan = searchParams.get("plan")?.trim() ?? "";
 
-  const [mode, setMode] = useState<AuthMode>(openedFromResetLink ? "forgot" : "login");
+  const [mode, setMode] = useState<AuthMode>(
+    openedFromResetLink ? "forgot" : signup === "register" ? "admin" : "login",
+  );
   const [step, setStep] = useState<LoginStep>("email");
   const [resetPhase, setResetPhase] = useState<PasswordResetPhase>(openedFromResetLink ? "code" : "email");
   const [name, setName] = useState("");
-  const [email, setEmail] = useState(openedFromResetLink ? resetEmail : "");
+  const [email, setEmail] = useState(paidEmail);
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [organizationName, setOrganizationName] = useState("");
@@ -100,6 +105,7 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [forgotFrom, setForgotFrom] = useState<"email" | "password">("email");
+  const [finishAccount, setFinishAccount] = useState(signup === "register" && Boolean(paidEmail));
 
   const selectedWorkspace = workspaces[selectedIndex] ?? null;
   const trackerStep: 1 | 2 | 3 = step === "email" ? 1 : step === "password" ? 3 : 2;
@@ -156,6 +162,11 @@ export default function Login() {
     try {
       const result = await lookupWorkspaces(normalized);
       setEmail(normalized);
+      if (result.needsRegistration) {
+        setFinishAccount(true);
+        setMode("admin");
+        return;
+      }
       if (result.workspaces.length > 0) {
         setWorkspaces(result.workspaces);
         setSelectedIndex(0);
@@ -249,6 +260,7 @@ export default function Login() {
         email: email.trim().toLowerCase(),
         password,
         organizationName: organizationName.trim(),
+        planSlug: selectedPlan || undefined,
       });
     } catch (err) {
       setError(errorMessage(err, "Unable to create admin account. Please try again."));
@@ -280,7 +292,11 @@ export default function Login() {
 
   const subtitle =
     mode === "admin"
-      ? "Set up your company workspace and invite your team."
+      ? finishAccount
+        ? "Payment received. Create your password to finish your account."
+        : "Set up your company workspace and invite your team."
+      : signup === "login" && paidEmail && step === "email"
+        ? "Payment received. Sign in with your password."
       : mode === "forgot"
         ? resetPhase === "password"
           ? "Choose a new password."
@@ -551,6 +567,7 @@ export default function Login() {
                       value={email}
                       onChange={(event) => setEmail(event.target.value)}
                       className={fieldClass}
+                      readOnly={finishAccount}
                       required
                     />
                   </Field>
@@ -581,8 +598,8 @@ export default function Login() {
                   {error ? <p className="text-sm text-red-500">{error}</p> : null}
                   <PrimaryButton
                     busy={isRegistering}
-                    label="Create your workspace"
-                    busyLabel="Creating workspace..."
+                    label={finishAccount ? "Create your account" : "Create your workspace"}
+                    busyLabel="Creating account..."
                   />
                   <button
                     type="button"
@@ -610,9 +627,15 @@ export default function Login() {
         <footer className="relative z-10 flex flex-col gap-2 px-5 py-4 text-xs text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:px-8">
           <p>© {new Date().getFullYear()} AASO. All rights reserved.</p>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-            <span>Privacy</span>
-            <span>Terms</span>
-            <span>Help</span>
+          <Link to="/privacy" className="hover:text-[#2563EB]">
+              Privacy
+            </Link>
+            <Link to="/terms" className="hover:text-[#2563EB]">
+              Terms
+            </Link>
+            <Link to="/help" className="hover:text-[#2563EB]">
+              Help
+            </Link>
             <Link to="/client/login" className="hover:text-[#2563EB]">
               Client portal
             </Link>

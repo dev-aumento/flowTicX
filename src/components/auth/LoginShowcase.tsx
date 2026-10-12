@@ -47,8 +47,8 @@ export function LoginShowcase() {
         }}
       />
 
-      <div className="relative z-10 flex min-h-0 flex-1 flex-col px-8 py-7 xl:px-12 xl:py-8">
-        <div className="flex items-start justify-between gap-6">
+      <div className="relative z-10 flex min-h-0 flex-1 flex-col px-8 py-5 xl:px-10 xl:py-6">
+        <div className="flex shrink-0 items-start justify-between gap-6">
           <div className="min-w-0">
             <BrandLogo variant="dark" imgClassName="h-9" href={AASO_SITE_URL} />
             <p className="mt-2 max-w-[240px] text-[11px] leading-snug text-white/65">
@@ -60,7 +60,7 @@ export function LoginShowcase() {
           </p>
         </div>
 
-        <div className="mt-5 xl:mt-7">
+        <div className="relative z-20 mt-4 shrink-0 xl:mt-5">
           <h2 className="max-w-xl text-[2rem] font-semibold leading-[1.08] tracking-tight xl:text-[2.7rem]">
             Everything your
             <br />
@@ -68,11 +68,11 @@ export function LoginShowcase() {
             <br />
             <span className="text-[#4C8DFF]">Connected.</span>
           </h2>
-          <p className="mt-4 max-w-md text-sm leading-relaxed text-white/70">
+          <p className="mt-3 max-w-md text-sm leading-relaxed text-white/70">
             Manage projects, people, clients, time, finances and grow your business from one
             powerful workspace.
           </p>
-          <div className="mt-5 flex flex-wrap gap-2">
+          <div className="mt-3 flex flex-wrap gap-2">
             {features.map((feature) => {
               const Icon = feature.icon;
               return (
@@ -95,11 +95,11 @@ export function LoginShowcase() {
           </div>
         </div>
 
-        <div className="mt-6 flex min-h-0 flex-1 items-end">
+        <div className="mt-3 flex min-h-0 w-full flex-1 items-end justify-center overflow-hidden">
           <ProductPreview />
         </div>
 
-        <div className="mt-5 grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
+        <div className="mt-3 grid shrink-0 grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
           {stats.map((stat) => (
             <div key={stat.label}>
               <div className="text-xl font-semibold tracking-tight xl:text-2xl">{stat.value}</div>
@@ -114,21 +114,10 @@ export function LoginShowcase() {
 
 function ProductPreview() {
   return (
-    <div className="relative w-full" aria-hidden>
-      <img
-        src="/login-dashboard.png"
-        alt=""
-        className="block w-[84%] rounded-[18px] shadow-[0_22px_50px_rgba(0,0,0,0.42)] ring-1 ring-white/15"
-      />
-      <div className="absolute bottom-0 right-0 z-10 w-[34%] max-w-[210px]">
-        <div className="rounded-[22px] bg-[#111827] p-[3px] shadow-[0_16px_36px_rgba(0,0,0,0.5)]">
-          <img
-            src="/login-mobile.png"
-            alt=""
-            className="block max-h-[280px] w-full rounded-[19px] object-cover object-top xl:max-h-[320px]"
-          />
-        </div>
-      </div>
-    </div>
+    <img
+      src="/desktop-dashboard.png"
+      alt=""
+      className="block h-auto max-h-full w-full object-contain object-bottom"
+    />
   );
 }

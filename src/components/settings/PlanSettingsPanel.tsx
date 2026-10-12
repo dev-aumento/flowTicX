@@ -57,7 +57,8 @@ export function PlanSettingsPanel() {
   const currency = detectPlanCurrency();
   const durationDays = current.durationDays ?? catalog?.durationDays ?? null;
   const intervalLabel = catalog ? planIntervalLabel(planBillingInterval(catalog)) : null;
-  const price = current.introEnterprise
+  const complimentary = current.introEnterprise || current.introPlanTrial;
+  const price = complimentary
     ? 0
     : catalog
       ? planPriceForCurrency(catalog, currency)
@@ -65,7 +66,7 @@ export function PlanSettingsPanel() {
         ? current.subscriptionAmount ?? 0
         : 0;
   const details = [
-    current.introEnterprise ? "Complimentary for 1 month" : formatPlanMoney(price, currency),
+    complimentary ? "Free for 1 month" : formatPlanMoney(price, currency),
     intervalLabel,
     durationDays ? formatPlanDuration(durationDays) : null,
     current.planExpiresAt ? `Ends ${formatPlanDate(current.planExpiresAt)}` : null,

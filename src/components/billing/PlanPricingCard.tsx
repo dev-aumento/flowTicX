@@ -8,7 +8,7 @@ import {
   type PlanDisplayCurrency,
   type PlatformPlan,
 } from "@/lib/platform-admin";
-import { isPopularPlan, planChecklist, teamMemberLabel } from "@/lib/plan-entitlements";
+import { planChecklist, teamMemberLabel } from "@/lib/plan-entitlements";
 import { cn } from "@/lib/utils";
 
 export function PlanPricingCard({
@@ -31,7 +31,6 @@ export function PlanPricingCard({
   action?: ReactNode;
   footer?: ReactNode;
 }) {
-  const featured = !plain && isPopularPlan(plan) && !selected;
   const lines = planChecklist(plan);
 
   return (
@@ -41,16 +40,14 @@ export function PlanPricingCard({
         plain ? "pt-5" : "pt-7",
         selected
           ? "border-[#2563EB] ring-2 ring-[#2563EB]/20 dark:border-blue-400"
-          : featured
-            ? "border-[#93C5FD] bg-[#F5F8FF] dark:border-blue-500/40 dark:bg-blue-500/10"
-            : "border-[#E6E8EC] dark:border-[#1E293B]",
+          : "border-[#E6E8EC] dark:border-[#1E293B]",
       )}
     >
       {!plain && plan.badge ? (
         <span
           className={cn(
             "absolute left-1/2 top-0 -translate-x-1/2 -translate-y-1/2 rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.08em]",
-            featured || /most popular/i.test(plan.badge)
+            /most popular/i.test(plan.badge ?? "")
               ? "bg-[#2563EB] text-white"
               : "bg-[#EEF4FF] text-[#2563EB] dark:bg-blue-500/15 dark:text-blue-200",
           )}

@@ -19,7 +19,6 @@ import {
   type PlanBillingInterval,
 } from "@/lib/platform-admin";
 import { completePlanCheckout, RazorpayCheckoutClosed } from "@/lib/razorpay-checkout";
-import { isPopularPlan } from "@/lib/plan-entitlements";
 import { clearPlanEndedNotice } from "@/lib/plan-ended";
 import { writeAuthCache } from "@/lib/auth-cache";
 import { getDefaultHomePath } from "@/lib/permissions";
@@ -58,7 +57,8 @@ export default function RenewPricing() {
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
   const [syncedInterval, setSyncedInterval] = useState(false);
   const context = contextQuery.data;
-  const canRenew = loggedInAdmin || context?.canRenew === true;
+  const isGuest = !authLoading && !user;
+  const canChoose = loggedInAdmin || context?.canRenew === true || isGuest;
   const currentSlug = current?.plan ?? "";
 
   useEffect(() => {
@@ -87,8 +87,12 @@ export default function RenewPricing() {
   );
 
   function continueWith(slug: string) {
-    if (!canRenew || pendingSlug) return;
+    if (!canChoose || pendingSlug) return;
     setSelectedSlug(slug);
+    if (isGuest) {
+      navigate(`/login?signup=register&plan=${encodeURIComponent(slug)}`);
+      return;
+    }
     if (loggedInAdmin && slug === currentSlug) {
       navigate(returnTo, {
         replace: true,
@@ -103,7 +107,21 @@ export default function RenewPricing() {
       (proof) => confirmPayment.mutateAsync(proof),
     )
       .then(async (result) => {
-        toast.success(`${result.planName ?? "Plan"} is now active`);
+        if (result.accountNext === "register" && result.accountEmail) {
+          toast.success("Payment received. Create your account to sign in.");
+          navigate(`/login?email=${encodeURIComponent(result.accountEmail)}&signup=register`, { replace: true });
+          return;
+        }
+        if (result.accountNext === "login" && result.accountEmail) {
+          toast.success("Payment received. Sign in with your password.");
+          navigate(`/login?email=${encodeURIComponent(result.accountEmail)}&signup=login`, { replace: true });
+          return;
+        }
+        toast.success(
+          result.planStatus === "trial"
+            ? `Your 1 month free trial of ${result.planName ?? "this plan"} has started`
+            : `${result.planName ?? "Plan"} is now active`,
+        );
         if (result.renewedSession && result.user) {
           writeAuthCache(result.user);
           utils.auth.me.setData(undefined, result.user);
@@ -130,8 +148,8 @@ export default function RenewPricing() {
   }
 
   function renderPlanCard(plan: (typeof visiblePlans)[number]) {
+    const isCurrent = Boolean(currentSlug) && plan.slug === currentSlug;
     const selected = plan.slug === selectedSlug;
-    const featured = isPopularPlan(plan);
     const pending = pendingSlug === plan.slug;
     return (
       <PlanPricingCard
@@ -141,17 +159,17 @@ export default function RenewPricing() {
         action={
           <button
             type="button"
-            disabled={!canRenew || pendingSlug != null}
+            disabled={!canChoose || pendingSlug != null || isCurrent}
             onClick={() => continueWith(plan.slug)}
             className={cn(
               "inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl text-sm font-semibold disabled:opacity-60",
-              selected || featured
-                ? "bg-[#2563EB] text-white hover:bg-[#1D4ED8]"
+              isCurrent
+                ? "border border-[#E6E8EC] bg-white text-[#6B7280]"
                 : "border border-[#2563EB] bg-white text-[#2563EB] hover:bg-[#EEF4FF]",
             )}
           >
             {pending ? <Loader2 size={16} className="animate-spin" /> : null}
-            {plan.amount > 0 ? "Continue with this plan" : "Continue with this plan"}
+            {isCurrent ? "Current plan" : "Continue with this plan"}
           </button>
         }
       />
@@ -164,7 +182,7 @@ export default function RenewPricing() {
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
           <BrandLogo variant="light" imgClassName="h-8" />
           <Link
-            to={loggedInAdmin ? returnTo : "/plan-ended"}
+            to={loggedInAdmin ? returnTo : isGuest ? "/login" : "/plan-ended"}
             state={loggedInAdmin && returnTo === "/settings" ? { tab: "plans" } : undefined}
             className="inline-flex items-center gap-1 text-sm font-medium text-[#2563EB] hover:underline"
           >
@@ -177,7 +195,7 @@ export default function RenewPricing() {
       <main className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6">
         <div className="space-y-2">
           <h1 className="text-2xl font-bold tracking-tight text-[#111827] sm:text-[28px]">
-            {loggedInAdmin ? "Choose a plan" : "Renew your plan"}
+            {loggedInAdmin || isGuest ? "Choose a plan" : "Renew your plan"}
           </h1>
           <p className="max-w-2xl text-sm text-[#6B7280]">
             {context?.organizationName
@@ -185,11 +203,13 @@ export default function RenewPricing() {
               : "Choose a monthly or yearly plan. "}
             Paid plans are charged in INR through Razorpay and start after the payment succeeds. The tools you can use follow the features included in the plan you select.
           </p>
-          {!authLoading && !loggedInAdmin && contextQuery.isSuccess && !canRenew ? (
+          {isGuest ? (
+            <p className="text-sm text-[#374151]">
+              Select any plan and create your account. The first month of that plan is free. After that month, purchase a plan to continue.
+            </p>
+          ) : !authLoading && !loggedInAdmin && contextQuery.isSuccess && !canChoose ? (
             <p className="text-sm text-amber-800">
-              {context?.signedIn
-                ? "Only the workspace super admin can confirm a plan. Sign in with that account, then choose a plan here."
-                : "Sign in with the workspace super admin account first. After the plan-ended screen, open Renew your plan to choose one."}
+              Only the workspace super admin can confirm a plan. Sign in with that account, then choose a plan here.
             </p>
           ) : null}
         </div>

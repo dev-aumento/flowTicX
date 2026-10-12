@@ -16,7 +16,7 @@ import {
 } from "./queries/personal-info";
 import { assertPermission, hasPermission } from "./lib/permissions";
 import { getOrganizationName } from "./lib/organization";
-import { createOrganization, getOrganizationNameById } from "./lib/tenant";
+import { createOrganization, findOrganizationById, getOrganizationNameById } from "./lib/tenant";
 import {
   healPortalUser,
   isClientWorkspaceUser,
@@ -24,6 +24,7 @@ import {
 } from "./lib/client-workspace";
 import { assertActiveSubscription } from "./lib/subscription-access";
 import { findPlatformPlan } from "./lib/platform-plans";
+import { startSelectedPlanTrial } from "./lib/activate-plan";
 import { seedSampleWorkspaceOnce } from "./lib/sample-workspace";
 import { queuePlanNotification } from "./lib/notify-plan";
 import { ALL_PERMISSION_KEYS } from "@contracts/permissions";
@@ -443,11 +444,13 @@ export const authRouter = createRouter({
         email: z.string().email().max(320),
         password: z.string().min(8).max(128),
         organizationName: z.string().min(1).max(200),
+        planSlug: z.string().min(1).max(64).optional(),
       }),
     )
     .mutation(async ({ input, ctx }) => {
       if (useMemoryStore()) {
-        return registerMemoryUser({ ...input, role: "admin" }, ctx);
+        const created = await registerMemoryUser({ ...input, role: "admin" }, ctx);
+        return { ...created, needsPlanChoice: false };
       }
 
       try {
@@ -463,20 +466,58 @@ export const authRouter = createRouter({
 
       const email = input.email.trim().toLowerCase();
       const existing = await findUserByEmail(email);
-      if (existing) {
+      if (existing?.passwordHash) {
         throw new TRPCError({
           code: "CONFLICT",
-          message: "An account with this email already exists",
+          message: "An account with this email already exists. Sign in with your password.",
         });
+      }
+      if (existing && !existing.passwordHash) {
+        if (String(existing.role ?? "").toLowerCase() !== "admin" || existing.organizationId == null) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "An account with this email already exists",
+          });
+        }
+        const paidOrg = await findOrganizationById(existing.organizationId);
+        if (!paidOrg || paidOrg.workspaceType === "platform") {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "An account with this email already exists",
+          });
+        }
+        const passwordHash = await hashPassword(input.password);
+        const { firstName, lastName } = splitName(input.name);
+        const user = await updateById<UserDoc>(Collections.users, existing.id, {
+          name: input.name.trim(),
+          firstName,
+          lastName,
+          passwordHash,
+          updatedAt: new Date(),
+        });
+        if (!user) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Account not found" });
+        }
+        await updateById<OrganizationDoc>(Collections.organizations, paidOrg.id, {
+          name: input.organizationName.trim(),
+          updatedAt: new Date(),
+        });
+        const token = await createSessionForUser(user.id, ctx.req.headers, ctx.resHeaders);
+        return {
+          user: await toSessionUser(user, false),
+          organizationName: input.organizationName.trim(),
+          token,
+          needsPlanChoice: false,
+        };
       }
 
       const passwordHash = await hashPassword(input.password);
       const { firstName, lastName } = splitName(input.name);
       const org = await createOrganization(input.organizationName, null, {
-        plan: "enterprise",
+        plan: "trial",
         planStatus: "trial",
         subscriptionAmount: 0,
-        introEnterprise: true,
+        introEnterprise: false,
       });
 
       const user = await createUser({
@@ -507,14 +548,19 @@ export const authRouter = createRouter({
         console.error("[auth] Sample projects were not created:", error);
       }
 
-      const catalog = await findPlatformPlan(org.plan ?? "trial");
-      queuePlanNotification({
-        kind: "joined",
-        organizationId: org.id,
-        organizationName: org.name,
-        planName: org.introEnterprise ? "Enterprise (complimentary)" : catalog?.name ?? "Trial",
-        actorId: user.id,
-      });
+      const selectedPlan = input.planSlug
+        ? await startSelectedPlanTrial({ org, slug: input.planSlug, actorId: user.id })
+        : null;
+      const catalog = await findPlatformPlan(selectedPlan?.plan ?? org.plan ?? "trial");
+      if (!selectedPlan) {
+        queuePlanNotification({
+          kind: "joined",
+          organizationId: org.id,
+          organizationName: org.name,
+          planName: catalog?.name ?? "Trial",
+          actorId: user.id,
+        });
+      }
 
       const token = await createSessionForUser(
         user.id,
@@ -526,6 +572,7 @@ export const authRouter = createRouter({
         user: await toSessionUser(user, false),
         organizationName: org.name,
         token,
+        needsPlanChoice: !input.planSlug,
       };
     }),
 
@@ -1108,13 +1155,20 @@ export const authRouter = createRouter({
     .input(z.object({ email: z.string().email().max(320) }))
     .mutation(async ({ input }) => {
       const email = input.email.trim().toLowerCase();
+      const withRegistration = (users: UserDoc[], listed: Awaited<ReturnType<typeof listLoginWorkspaces>>) => {
+        const active = users.filter((user) => String(user.status ?? "").toLowerCase() === "active");
+        const needsRegistration = active.length > 0 && active.every((user) => !user.passwordHash);
+        return { ...listed, needsRegistration };
+      };
       if (useMemoryStore()) {
-        return listLoginWorkspaces(mock.mockFindUsersByEmail(email));
+        const users = mock.mockFindUsersByEmail(email);
+        return withRegistration(users, await listLoginWorkspaces(users));
       }
 
       try {
         await ensureSchema();
-        return listLoginWorkspaces(await findUsersByEmail(email));
+        const users = await findUsersByEmail(email);
+        return withRegistration(users, await listLoginWorkspaces(users));
       } catch (error) {
         if (error instanceof TRPCError) throw error;
         console.error("[auth] Workspace lookup failed:", error);

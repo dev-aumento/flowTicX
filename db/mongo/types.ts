@@ -144,6 +144,8 @@ export type OrganizationDoc = {
   subscriptionAmount?: number;
   /** True only for the complimentary first month of Enterprise given at signup. */
   introEnterprise?: boolean | null;
+  /** True while the first month of the plan the customer chose is still free. */
+  introPlanTrial?: boolean | null;
   purchasedAt?: Date | null;
   /** Inclusive start of the current plan window. */
   planStartsAt?: Date | null;
@@ -214,8 +216,11 @@ export type SubscriptionPlanDoc = {
 /** Razorpay order created before a workspace plan is marked paid. */
 export type SubscriptionCheckoutDoc = {
   id: number;
-  organizationId: number;
-  userId: number;
+  /** Null until a new buyer finishes payment and a workspace is created. */
+  organizationId: number | null;
+  userId: number | null;
+  /** Email collected by Razorpay for a buyer who did not have an account yet. */
+  buyerEmail?: string | null;
   planSlug: string;
   amountPaise: number;
   currency: "INR";

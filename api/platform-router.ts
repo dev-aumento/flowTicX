@@ -4,6 +4,7 @@ import type { OrganizationDoc, SubscriptionPlan, SubscriptionStatus, UserDoc } f
 import { getCollection, hasMongoConfigured, updateById } from "./queries/connection";
 import { findUserByEmail } from "./queries/users";
 import { addPlanDuration } from "@/lib/platform-admin";
+import { effectivePlanDurationDays } from "./lib/subscription-access";
 import { findPlatformPlan, listPlatformPlans, upsertPlatformPlan, deletePlatformPlan } from "./lib/platform-plans";
 import { deleteCustomerOrganization } from "./lib/delete-customer-org";
 import { invalidateAuthUserCache } from "./lib/auth";
@@ -75,7 +76,7 @@ function normalizeOrg(
   const purchasedAt = org.purchasedAt ?? org.createdAt ?? null;
   const planStartsAt = org.planStartsAt ?? purchasedAt;
   const planExpiresAt = planStartsAt
-    ? addPlanDuration(planStartsAt, plan, catalog?.durationDays)
+    ? addPlanDuration(planStartsAt, plan, effectivePlanDurationDays(org, catalog?.durationDays))
     : null;
   return {
     workspaceType,

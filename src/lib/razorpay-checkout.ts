@@ -86,6 +86,7 @@ export function openRazorpayCheckout(session: RazorpayCheckoutSession) {
           description: session.description,
           order_id: session.orderId,
           prefill: session.prefill,
+          readonly: { email: false, contact: false, name: false },
           theme: { color: "#2563EB" },
           handler(response: RazorpaySuccess) {
             if (settled) return;
@@ -123,15 +124,15 @@ function isPaymentSession(
   return value.requiresPayment === true;
 }
 
-export async function completePlanCheckout<T extends { requiresPayment: boolean }>(
+export async function completePlanCheckout<TBegin extends { requiresPayment: boolean }, TDone>(
   slug: string,
-  beginCheckout: (input: { slug: string }) => Promise<T>,
-  confirmPayment: (input: RazorpayPaymentProof) => Promise<Extract<T, { requiresPayment: false }>>,
-): Promise<Extract<T, { requiresPayment: false }>> {
+  beginCheckout: (input: { slug: string }) => Promise<TBegin>,
+  confirmPayment: (input: RazorpayPaymentProof) => Promise<TDone>,
+): Promise<Extract<TBegin, { requiresPayment: false }> | TDone> {
   const started = await beginCheckout({ slug });
   if (isPaymentSession(started)) {
     const proof = await openRazorpayCheckout(started);
     return confirmPayment(proof);
   }
-  return started as Extract<T, { requiresPayment: false }>;
+  return started as Extract<TBegin, { requiresPayment: false }>;
 }

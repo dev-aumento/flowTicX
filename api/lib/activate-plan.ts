@@ -4,7 +4,8 @@ import type { OrganizationDoc } from "@db/mongo/types";
 import { addPlanDuration } from "@/lib/platform-admin";
 import { findPlatformPlan } from "./platform-plans";
 import { hasMongoConfigured, updateById } from "../queries/connection";
-import { resolveOrgPlanAccess } from "./subscription-access";
+import { canStartIntroPlanTrial, INTRO_TRIAL_DAYS, introTrialStillOpen, resolveOrgPlanAccess } from "./subscription-access";
+import { planRequiresPayment } from "./razorpay";
 import { invalidateAuthUserCache } from "./auth";
 import { queuePlanNotification } from "./notify-plan";
 import { ensureSampleProjects } from "./sample-workspace";
@@ -45,6 +46,7 @@ export async function activateOrganizationPlan(input: {
     planCancelledAt: null,
     planCancelReason: null,
     introEnterprise: false,
+    introPlanTrial: false,
     updatedAt: now,
   });
   if (!updated) {
@@ -72,13 +74,87 @@ export async function activateOrganizationPlan(input: {
   }
 
   const access = await resolveOrgPlanAccess(updated);
+  return presentActivatedPlan(updated, access, catalog.durationDays, startsAt, expiresAt);
+}
+
+/** One free month of the plan the customer chose. Payment starts only after that month. */
+export async function startSelectedPlanTrial(input: {
+  org: OrganizationDoc;
+  slug: string;
+  actorId: number | null;
+}) {
+  if (!hasMongoConfigured()) {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Database is not configured" });
+  }
+  const catalog = await findPlatformPlan(input.slug);
+  if (!catalog) {
+    throw new TRPCError({ code: "NOT_FOUND", message: "Plan not found" });
+  }
+  if (!planRequiresPayment(catalog)) {
+    return activateOrganizationPlan(input);
+  }
+  if (!canStartIntroPlanTrial(input.org)) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "Your free month has ended. Purchase a plan to continue.",
+    });
+  }
+
+  const now = new Date();
+  const continuing = introTrialStillOpen(input.org);
+  const startsAt = continuing && input.org.planStartsAt ? new Date(input.org.planStartsAt) : now;
+  const expiresAt = addPlanDuration(startsAt, catalog.slug, INTRO_TRIAL_DAYS);
+  const updated = await updateById<OrganizationDoc>(Collections.organizations, input.org.id, {
+    plan: catalog.slug,
+    planStatus: "trial",
+    subscriptionAmount: 0,
+    purchasedAt: input.org.purchasedAt ?? now,
+    planStartsAt: startsAt,
+    planExpiresAt: expiresAt,
+    planCancelledAt: null,
+    planCancelReason: null,
+    introEnterprise: false,
+    introPlanTrial: true,
+    updatedAt: now,
+  });
+  if (!updated) {
+    throw new TRPCError({ code: "NOT_FOUND", message: "Workspace not found" });
+  }
+
+  const previousSlug = input.org.plan ?? "trial";
+  if (previousSlug !== catalog.slug) {
+    queuePlanNotification({
+      kind: "updated",
+      organizationId: updated.id,
+      organizationName: updated.name,
+      planName: `${catalog.name} (1 month free)`,
+      actorId: input.actorId,
+    });
+  }
+  invalidateAuthUserCache();
+  try {
+    await ensureSampleProjects(updated.id, updated.plan ?? "trial");
+  } catch (error) {
+    console.error("[subscription] Sample projects were not updated:", error);
+  }
+  const access = await resolveOrgPlanAccess(updated);
+  return presentActivatedPlan(updated, access, INTRO_TRIAL_DAYS, startsAt, expiresAt);
+}
+
+function presentActivatedPlan(
+  updated: OrganizationDoc,
+  access: Awaited<ReturnType<typeof resolveOrgPlanAccess>>,
+  durationDays: number,
+  startsAt: Date,
+  expiresAt: Date,
+) {
   return {
     organizationId: updated.id,
     organizationName: updated.name,
     ...access,
-    subscriptionAmount: updated.subscriptionAmount ?? catalog.amount,
+    subscriptionAmount: updated.subscriptionAmount ?? 0,
     planStartsAt: updated.planStartsAt ?? startsAt,
     planExpiresAt: updated.planExpiresAt ?? expiresAt,
-    durationDays: catalog.durationDays,
+    durationDays,
   };
 }
