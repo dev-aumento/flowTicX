@@ -15,17 +15,18 @@ export function PricingHeader({ plansAnchor }: { plansAnchor: string }) {
 
         <div className="flex items-center gap-1 sm:gap-3">
           <Link
-            to="/login"
-            className="rounded-[8px] px-2.5 py-2 text-sm font-semibold leading-5 text-[#2563eb] hover:bg-[rgba(37,99,235,0.08)] sm:px-4 sm:text-base"
+            to="https://aaso.tech"
+            className="rounded-[8px] flex items-center gap-2 px-2.5 py-2 text-sm font-semibold leading-5 text-[#2563eb] hover:bg-[rgba(37,99,235,0.08)] sm:px-4 sm:text-base"
           >
-            Sign In
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-arrow-left" aria-hidden="true"><path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path></svg>
+           Back to Home
           </Link>
-          <a
+          {/* <a
             href={`#${plansAnchor}`}
             className="rounded-[8px] bg-[#2563eb] px-3.5 py-2.5 text-sm font-semibold leading-5 text-white shadow-[0px_2px_5px_rgba(29,78,216,0.2)] hover:bg-[#1d4ed8] sm:px-6 sm:py-3 sm:text-base"
           >
             Start Free Trial
-          </a>
+          </a> */}
         </div>
       </div>
     </header>
