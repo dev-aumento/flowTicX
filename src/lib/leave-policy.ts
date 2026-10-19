@@ -1101,6 +1101,7 @@ export function isHrRestrictedPath(path: string): boolean {
   if (path === "/admin/client-tasks" || path.startsWith("/admin/client-tasks")) return true;
   if (path === "/projects" || path.startsWith("/projects/")) return true;
   if (path === "/task-chats" || path.startsWith("/task-chats/")) return true;
+  if (path === "/projectpulse" || path.startsWith("/projectpulse/")) return true;
   if (path === "/admin/permissions" || path.startsWith("/admin/permissions/")) return true;
   if (path === "/admin/manage-data" || path.startsWith("/admin/manage-data")) return true;
   if (path === "/admin/pricing" || path.startsWith("/admin/pricing")) return true;
@@ -1152,6 +1153,7 @@ export function isFinanceRestrictedPath(path: string): boolean {
   if (path === "/projects" || path.startsWith("/projects/")) return true;
   if (path === "/task-chats" || path.startsWith("/task-chats/")) return true;
   if (path === "/time-tracking" || path.startsWith("/time-tracking")) return true;
+  if (path === "/projectpulse" || path.startsWith("/projectpulse/")) return true;
   if (path === "/analytics" || path.startsWith("/analytics")) return true;
   if (path === "/admin/employees" || path.startsWith("/admin/employees")) return true;
   if (path === "/admin/departments" || path.startsWith("/admin/departments")) return true;

@@ -36,6 +36,8 @@ import {
   CreditCard,
 } from "lucide-react";
 import { TaskStatusLabelsPanel } from "@/components/settings/TaskStatusLabelsPanel";
+import { MobileBitrixProfile } from "@/components/layout/MobileBitrixProfile";
+import { isNativeApp } from "@/lib/native-shell";
 
 const TABS = [
   { key: "profile", label: "Profile", icon: User },
@@ -353,38 +355,8 @@ export default function Settings() {
     activeTab === "workspace" ||
     activeTab === "notifications";
 
-  return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-5xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-[#1F2937]">Settings</h1>
-        <p className="text-sm text-gray-500 mt-0.5">Manage your account and preferences</p>
-      </div>
-
-      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden flex flex-col lg:flex-row min-h-0 lg:min-h-[500px]">
-        <div className="lg:w-56 border-b lg:border-b-0 lg:border-r border-gray-200 bg-gray-50/50 flex-shrink-0 overflow-x-auto">
-          <nav className="flex lg:flex-col min-w-max lg:min-w-0">
-            {visibleTabs.map((tab) => (
-              <button
-                key={tab.key}
-                onClick={() => {
-                  setActiveTab(tab.key);
-                  setSaveError(null);
-                  setSaved(false);
-                }}
-                className={`flex items-center gap-2 lg:gap-3 px-3 sm:px-4 py-2.5 lg:py-3 text-sm font-medium transition-all whitespace-nowrap lg:w-full ${
-                  activeTab === tab.key
-                    ? "bg-white text-[#2563EB] border-b-[3px] lg:border-b-0 lg:border-l-[3px] border-[#2563EB]"
-                    : "text-gray-600 hover:bg-white/60 border-b-[3px] lg:border-b-0 lg:border-l-[3px] border-transparent"
-                }`}
-              >
-                <tab.icon size={18} className="flex-shrink-0" />
-                {tab.label}
-              </button>
-            ))}
-          </nav>
-        </div>
-
-        <div className="flex-1 p-4 sm:p-6 min-w-0 overflow-x-hidden">
+  const settingsDetail = (
+    <>
           {activeTab === "profile" && (
             <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="space-y-6">
               <h2 className="text-lg font-semibold text-[#1F2937]">Profile Settings</h2>
@@ -625,7 +597,60 @@ export default function Settings() {
               </button>
             </div>
           ) : null}
+    </>
+  );
+
+  if (isNativeApp()) {
+    return (
+      <MobileBitrixProfile
+        section={activeTab}
+        onOpenSection={(key) => {
+          setActiveTab(key);
+          setSaveError(null);
+          setSaved(false);
+        }}
+        onBack={() => {
+          setActiveTab("profile");
+          setSaveError(null);
+          setSaved(false);
+        }}
+        detail={settingsDetail}
+      />
+    );
+  }
+
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-5xl mx-auto space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-[#1F2937]">Settings</h1>
+        <p className="text-sm text-gray-500 mt-0.5">Manage your account and preferences</p>
+      </div>
+
+      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden flex flex-col lg:flex-row min-h-0 lg:min-h-[500px]">
+        <div className="lg:w-56 border-b lg:border-b-0 lg:border-r border-gray-200 bg-gray-50/50 flex-shrink-0 overflow-x-auto">
+          <nav className="flex lg:flex-col min-w-max lg:min-w-0">
+            {visibleTabs.map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => {
+                  setActiveTab(tab.key);
+                  setSaveError(null);
+                  setSaved(false);
+                }}
+                className={`flex items-center gap-2 lg:gap-3 px-3 sm:px-4 py-2.5 lg:py-3 text-sm font-medium transition-all whitespace-nowrap lg:w-full ${
+                  activeTab === tab.key
+                    ? "bg-white text-[#2563EB] border-b-[3px] lg:border-b-0 lg:border-l-[3px] border-[#2563EB]"
+                    : "text-gray-600 hover:bg-white/60 border-b-[3px] lg:border-b-0 lg:border-l-[3px] border-transparent"
+                }`}
+              >
+                <tab.icon size={18} className="flex-shrink-0" />
+                {tab.label}
+              </button>
+            ))}
+          </nav>
         </div>
+
+        <div className="flex-1 p-4 sm:p-6 min-w-0 overflow-x-hidden">{settingsDetail}</div>
       </div>
 
       <AvatarPickerModal

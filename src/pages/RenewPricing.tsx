@@ -1,10 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { useLocation, useNavigate } from "react-router";
+import { Loader2 } from "lucide-react";
 import { trpc } from "@/providers/trpc";
 import { useAuth } from "@/hooks/useAuth";
-import { PlanPricingCard } from "@/components/billing/PlanPricingCard";
-import { PlanIntervalTabs } from "@/components/billing/PlanIntervalTabs";
+import { PricingPlanCard } from "@/components/billing/PricingPlanCard";
+import { PricingIntervalToggle } from "@/components/billing/PricingIntervalToggle";
+import { PricingHero } from "@/components/billing/PricingHero";
+import { PricingBenefits } from "@/components/billing/PricingBenefits";
+import { PricingComparison } from "@/components/billing/PricingComparison";
+import { PricingPaymentMethods } from "@/components/billing/PricingPaymentMethods";
+import { PricingFaq } from "@/components/billing/PricingFaq";
+import { PricingCtaBanner } from "@/components/billing/PricingCtaBanner";
+import { AASO_APP_URL } from "@/components/brand/BrandLogo";
 import {
   Carousel,
   CarouselContent,
@@ -12,8 +19,9 @@ import {
   CarouselNext,
   CarouselPrevious,
 } from "@/components/ui/carousel";
-import { BrandLogo } from "@/components/brand/BrandLogo";
+import { PricingHeader } from "@/components/billing/PricingHeader";
 import {
+  isFreeCatalogPlan,
   planBillingInterval,
   sortPlansByPrice,
   type PlanBillingInterval,
@@ -22,16 +30,7 @@ import { completePlanCheckout, RazorpayCheckoutClosed } from "@/lib/razorpay-che
 import { clearPlanEndedNotice } from "@/lib/plan-ended";
 import { writeAuthCache } from "@/lib/auth-cache";
 import { getDefaultHomePath } from "@/lib/permissions";
-import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-
-function isComplimentaryTrial(plan: { slug: string; name: string; badge?: string | null; amount: number }) {
-  const slug = plan.slug.trim().toLowerCase();
-  if (slug === "trial" || slug === "free") return true;
-  const name = plan.name.trim().toLowerCase();
-  if (name === "free" || name === "free trial") return true;
-  return plan.amount === 0 && /free/i.test(plan.badge ?? "");
-}
 
 export default function RenewPricing() {
   const navigate = useNavigate();
@@ -55,7 +54,6 @@ export default function RenewPricing() {
   const currency = "INR" as const;
   const [interval, setInterval] = useState<PlanBillingInterval>("month");
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
-  const [syncedInterval, setSyncedInterval] = useState(false);
   const context = contextQuery.data;
   const isGuest = !authLoading && !user;
   const canChoose = loggedInAdmin || context?.canRenew === true || isGuest;
@@ -64,31 +62,88 @@ export default function RenewPricing() {
   useEffect(() => {
     if (!currentSlug || selectedSlug || !plans) return;
     const active = plans.find((plan) => plan.slug === currentSlug);
-    if (!active || isComplimentaryTrial(active)) return;
+    if (!active) return;
     setSelectedSlug(currentSlug);
   }, [currentSlug, selectedSlug, plans]);
-
-  useEffect(() => {
-    if (syncedInterval || !currentSlug || !plans) return;
-    const active = plans.find((plan) => plan.slug === currentSlug);
-    if (!active) return;
-    setInterval(planBillingInterval(active));
-    setSyncedInterval(true);
-  }, [currentSlug, plans, syncedInterval]);
 
   const visiblePlans = useMemo(
     () =>
       sortPlansByPrice(
-        (plans ?? []).filter(
-          (plan) => planBillingInterval(plan) === interval && !isComplimentaryTrial(plan),
-        ),
+        (plans ?? []).filter((plan) => planBillingInterval(plan) === interval),
       ),
     [plans, interval],
   );
 
+  // Yearly plans show how much they save over twelve months of the monthly plan with the same name.
+  const yearlySavings = useMemo(() => {
+    const savings = new Map<string, number>();
+    if (interval !== "year") return savings;
+    const perMonth = (plan: { amount: number; durationDays: number }) =>
+      plan.amount / Math.max(1, Math.round(plan.durationDays / (365 / 12)));
+    for (const plan of visiblePlans) {
+      if (isFreeCatalogPlan(plan)) continue;
+      const monthly = (plans ?? []).find(
+        (item) =>
+          planBillingInterval(item) === "month" &&
+          item.name.trim().toLowerCase() === plan.name.trim().toLowerCase(),
+      );
+      if (!monthly || monthly.amount <= 0) continue;
+      const percent = Math.round((1 - perMonth(plan) / perMonth(monthly)) * 100);
+      if (percent > 0) savings.set(plan.slug, percent);
+    }
+    return savings;
+  }, [interval, visiblePlans, plans]);
+
+  // The catalog seeds either "free" or "trial" as the free tier, so read the slug instead of guessing it.
+  // Registering with it activates the free plan; without a slug the new admin is sent back here to choose.
+  const freePlanSlug = useMemo(() => {
+    const free = (plans ?? []).filter((plan) => isFreeCatalogPlan(plan));
+    return (free.find((plan) => planBillingInterval(plan) === "month") ?? free[0])?.slug ?? null;
+  }, [plans]);
+  // Signed-in users already have a workspace, so the banner takes them to the plans instead of the register form.
+  const trialHref =
+    authLoading || user
+      ? "#plans"
+      : freePlanSlug
+        ? `${AASO_APP_URL}/login?signup=register&plan=${encodeURIComponent(freePlanSlug)}`
+        : `${AASO_APP_URL}/login?signup=register`;
+
   function continueWith(slug: string) {
     if (!canChoose || pendingSlug) return;
     setSelectedSlug(slug);
+    const plan = (plans ?? []).find((item) => item.slug === slug);
+    if (plan && isFreeCatalogPlan(plan)) {
+      if (!user) {
+        navigate(`/login?plan=${encodeURIComponent(slug)}`);
+        return;
+      }
+      setPendingSlug(slug);
+      void beginCheckout
+        .mutateAsync({ slug })
+        .then(async (result) => {
+          if (result.needsAccount || result.requiresPayment || !user) {
+            navigate(`/login?plan=${encodeURIComponent(slug)}`);
+            return;
+          }
+          toast.success(`${result.planName ?? plan.name} is now active`);
+          if (result.renewedSession && result.user) {
+            writeAuthCache(result.user);
+            utils.auth.me.setData(undefined, result.user);
+            clearPlanEndedNotice();
+            await utils.invalidate();
+            navigate(getDefaultHomePath(result.user), { replace: true });
+            return;
+          }
+          clearPlanEndedNotice();
+          await utils.auth.me.invalidate();
+          navigate(getDefaultHomePath(user), { replace: true });
+        })
+        .catch((error: unknown) => {
+          toast.error(error instanceof Error ? error.message : "The free plan could not be started");
+        })
+        .finally(() => setPendingSlug(null));
+      return;
+    }
     if (isGuest) {
       navigate(`/login?signup=register&plan=${encodeURIComponent(slug)}`);
       return;
@@ -150,84 +205,54 @@ export default function RenewPricing() {
   function renderPlanCard(plan: (typeof visiblePlans)[number]) {
     const isCurrent = Boolean(currentSlug) && plan.slug === currentSlug;
     const selected = plan.slug === selectedSlug;
-    const pending = pendingSlug === plan.slug;
+    const ctaLabel = isCurrent
+      ? "Current plan"
+      : isFreeCatalogPlan(plan)
+        ? "Get Started Free"
+        : `Choose ${plan.name}`;
     return (
-      <PlanPricingCard
+      <PricingPlanCard
         plan={plan}
         selected={selected}
         currency={currency}
-        action={
-          <button
-            type="button"
-            disabled={!canChoose || pendingSlug != null || isCurrent}
-            onClick={() => continueWith(plan.slug)}
-            className={cn(
-              "inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl text-sm font-semibold disabled:opacity-60",
-              isCurrent
-                ? "border border-[#E6E8EC] bg-white text-[#6B7280]"
-                : "border border-[#2563EB] bg-white text-[#2563EB] hover:bg-[#EEF4FF]",
-            )}
-          >
-            {pending ? <Loader2 size={16} className="animate-spin" /> : null}
-            {isCurrent ? "Current plan" : "Continue with this plan"}
-          </button>
-        }
+        ctaLabel={ctaLabel}
+        savingsPercent={yearlySavings.get(plan.slug)}
+        pending={pendingSlug === plan.slug}
+        disabled={!canChoose || pendingSlug != null || isCurrent}
+        onSelect={() => continueWith(plan.slug)}
       />
     );
   }
 
+  // overflow-x-clip, not hidden: hidden turns this wrapper into a scroll container and breaks the sticky header.
   return (
-    <div className="min-h-screen bg-[#F4F6F8]">
-      <header className="border-b border-[#E6E8EC] bg-white">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
-          <BrandLogo variant="light" imgClassName="h-8" />
-          <Link
-            to={loggedInAdmin ? returnTo : isGuest ? "/login" : "/plan-ended"}
-            state={loggedInAdmin && returnTo === "/settings" ? { tab: "plans" } : undefined}
-            className="inline-flex items-center gap-1 text-sm font-medium text-[#2563EB] hover:underline"
-          >
-            <ArrowLeft size={14} />
-            {loggedInAdmin ? "Back to settings" : "Back"}
-          </Link>
-        </div>
-      </header>
+    <div className="force-light min-h-screen overflow-x-clip bg-[#F7F8FC] text-[#111827]">
+      <PricingHeader plansAnchor="plans" />
 
-      <main className="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6">
-        <div className="space-y-2">
-          <h1 className="text-2xl font-bold tracking-tight text-[#111827] sm:text-[28px]">
-            {loggedInAdmin || isGuest ? "Choose a plan" : "Renew your plan"}
-          </h1>
-          <p className="max-w-2xl text-sm text-[#6B7280]">
-            {context?.organizationName
-              ? `Choose a monthly or yearly plan for ${context.organizationName}. `
-              : "Choose a monthly or yearly plan. "}
-            Paid plans are charged in INR through Razorpay and start after the payment succeeds. The tools you can use follow the features included in the plan you select.
-          </p>
-          {isGuest ? (
-            <p className="text-sm text-[#374151]">
-              Select any plan and create your account. The first month of that plan is free. After that month, purchase a plan to continue.
-            </p>
-          ) : !authLoading && !loggedInAdmin && contextQuery.isSuccess && !canChoose ? (
-            <p className="text-sm text-amber-800">
+      <PricingHero />
+
+      <main id="plans" className="mx-auto flex max-w-[1700px] scroll-mt-20 flex-col gap-10 px-4 py-6 sm:px-6 lg:px-8">
+        <div className="flex flex-col items-center gap-4">
+          <PricingIntervalToggle value={interval} onChange={setInterval} />
+          {!authLoading && !loggedInAdmin && contextQuery.isSuccess && !canChoose ? (
+            <p className="max-w-xl text-center text-sm text-amber-800">
               Only the workspace super admin can confirm a plan. Sign in with that account, then choose a plan here.
             </p>
           ) : null}
         </div>
 
-        <PlanIntervalTabs value={interval} onChange={setInterval} />
-
         {isLoading ? (
-          <div className="flex min-h-[30vh] items-center justify-center text-[#6B7280]">
+          <div className="flex min-h-[30vh] items-center justify-center text-[#374151] dark:text-[#E5E7EB]">
             <Loader2 className="mr-2 h-5 w-5 animate-spin" />
             Loading pricing plans...
           </div>
         ) : visiblePlans.length === 0 ? (
-          <p className="rounded-2xl border border-dashed border-[#E6E8EC] bg-white px-5 py-10 text-center text-sm text-[#6B7280]">
+          <p className="rounded-2xl border border-dashed border-[#E6E8EC] bg-white px-5 py-10 text-center text-sm text-[#374151] dark:border-[#3B4A63] dark:bg-[#151C2C] dark:text-[#E5E7EB]">
             No {interval === "year" ? "yearly" : "monthly"} plans are available yet.
           </p>
         ) : (
           <>
-            <div className="hidden items-stretch gap-4 xl:grid xl:grid-cols-4">
+            <div className="hidden items-stretch gap-4 xl:grid xl:grid-cols-5">
               {visiblePlans.map((plan) => (
                 <div key={plan.slug} className="h-full min-w-0">
                   {renderPlanCard(plan)}
@@ -241,9 +266,9 @@ export default function RenewPricing() {
                 opts={{ align: "start", containScroll: "trimSnaps" }}
                 className="w-full"
               >
-                <CarouselContent className="ml-0 md:-ml-4">
+                <CarouselContent className="-ml-3 md:-ml-4">
                   {visiblePlans.map((plan) => (
-                    <CarouselItem key={plan.slug} className="basis-full pt-5 pl-0 md:basis-1/2 md:pl-4">
+                    <CarouselItem key={plan.slug} className="basis-[88%] pl-3 pt-5 sm:basis-[70%] md:basis-1/2 md:pl-4 lg:basis-1/3">
                       {renderPlanCard(plan)}
                     </CarouselItem>
                   ))}
@@ -257,6 +282,16 @@ export default function RenewPricing() {
           </>
         )}
       </main>
+
+      <PricingBenefits />
+
+      <PricingComparison />
+
+      <PricingPaymentMethods />
+
+      <PricingFaq />
+
+      <PricingCtaBanner trialHref={trialHref} />
     </div>
   );
 }

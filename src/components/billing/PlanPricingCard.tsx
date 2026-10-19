@@ -36,11 +36,11 @@ export function PlanPricingCard({
   return (
     <article
       className={cn(
-        "relative flex h-full flex-col rounded-2xl border bg-white px-5 pb-5 shadow-sm dark:bg-[#0F172A]",
+        "relative flex h-full flex-col rounded-2xl border bg-white px-5 pb-5 shadow-sm dark:bg-[#151C2C]",
         plain ? "pt-5" : "pt-7",
         selected
-          ? "border-[#2563EB] ring-2 ring-[#2563EB]/20 dark:border-blue-400"
-          : "border-[#E6E8EC] dark:border-[#1E293B]",
+          ? "border-[#2563EB] ring-2 ring-[#2563EB]/20 dark:border-[#60A5FA]"
+          : "border-[#E6E8EC] dark:border-[#3B4A63]",
       )}
     >
       {!plain && plan.badge ? (
@@ -57,28 +57,28 @@ export function PlanPricingCard({
       ) : null}
 
       <h2 className="text-lg font-semibold text-[#111827] dark:text-white">{plan.name}</h2>
-      <p className="mt-1 min-h-10 text-sm leading-5 text-[#6B7280]">{plan.description}</p>
+      <p className="mt-1 min-h-10 text-sm leading-5 text-[#4B5563] dark:text-[#E5E7EB]">{plan.description}</p>
 
       <p className="mt-4 text-[32px] font-bold leading-none tracking-tight text-[#111827] dark:text-white">
         {formatPlanMoney(planPriceForCurrency(plan, showBothCurrencies ? "INR" : currency), showBothCurrencies ? "INR" : currency)}
-        <span className="ml-1 text-sm font-medium text-[#6B7280]">{planPriceSuffix(plan.durationDays)}</span>
+        <span className="ml-1 text-sm font-medium text-[#4B5563] dark:text-[#E5E7EB]">{planPriceSuffix(plan.durationDays)}</span>
       </p>
       {showBothCurrencies ? (
-        <p className="mt-1.5 text-sm font-medium text-[#6B7280]">
+        <p className="mt-1.5 text-sm font-medium text-[#4B5563] dark:text-[#E5E7EB]">
           {formatUsd(plan.amountUsd ?? 0)}
           <span className="ml-1">{planPriceSuffix(plan.durationDays)}</span>
         </p>
       ) : null}
-      <p className="mt-2 text-sm font-medium text-[#111827] dark:text-slate-200">
+      <p className="mt-2 text-sm font-medium text-[#111827] dark:text-white">
         {teamMemberLabel(plan.limits.teamMembers)}
       </p>
 
       {action ? <div className="mt-4">{action}</div> : null}
 
-      <ul className="mt-4 flex-1 space-y-2.5 border-t border-[#E6E8EC] pt-4 dark:border-[#334155]">
+      <ul className="mt-4 flex-1 space-y-2.5 border-t border-[#E6E8EC] pt-4 dark:border-[#3B4A63]">
         {lines.map((line) => (
-          <li key={line} className="flex items-start gap-2 text-sm text-[#111827] dark:text-slate-100">
-            <Check size={16} className="mt-0.5 shrink-0 text-[#2563EB]" />
+          <li key={line} className="flex items-start gap-2 text-sm text-[#111827] dark:text-white">
+            <Check size={16} className="mt-0.5 shrink-0 text-[#2563EB] dark:text-[#93C5FD]" />
             <span>{line}</span>
           </li>
         ))}

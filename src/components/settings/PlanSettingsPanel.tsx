@@ -6,6 +6,7 @@ import {
   formatPlanDate,
   formatPlanDuration,
   formatPlanMoney,
+  isFreeCatalogPlan,
   planBillingInterval,
   planIntervalLabel,
   planPriceForCurrency,
@@ -58,6 +59,9 @@ export function PlanSettingsPanel() {
   const durationDays = current.durationDays ?? catalog?.durationDays ?? null;
   const intervalLabel = catalog ? planIntervalLabel(planBillingInterval(catalog)) : null;
   const complimentary = current.introEnterprise || current.introPlanTrial;
+  const unlimited = catalog
+    ? isFreeCatalogPlan(catalog)
+    : isFreeCatalogPlan({ slug: current.plan ?? "trial", amount: current.subscriptionAmount ?? 0 });
   const price = complimentary
     ? 0
     : catalog
@@ -65,12 +69,14 @@ export function PlanSettingsPanel() {
       : currency === "INR"
         ? current.subscriptionAmount ?? 0
         : 0;
-  const details = [
-    complimentary ? "Free for 1 month" : formatPlanMoney(price, currency),
-    intervalLabel,
-    durationDays ? formatPlanDuration(durationDays) : null,
-    current.planExpiresAt ? `Ends ${formatPlanDate(current.planExpiresAt)}` : null,
-  ].filter(Boolean);
+  const details = unlimited
+    ? [formatPlanMoney(0, currency), "No time limit"]
+    : [
+        complimentary ? "Free for 1 month" : formatPlanMoney(price, currency),
+        intervalLabel,
+        durationDays ? formatPlanDuration(durationDays) : null,
+        current.planExpiresAt ? `Ends ${formatPlanDate(current.planExpiresAt)}` : null,
+      ].filter(Boolean);
 
   return (
     <div className="space-y-6">

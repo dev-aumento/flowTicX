@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 export const AASO_SITE_URL = "https://aaso.tech";
+export const AASO_APP_URL = "https://app.aaso.tech";
 
 type BrandLogoProps = {
   /** `dark` = white wordmark on dark backgrounds. `light` = dark wordmark. `auto` follows theme. */

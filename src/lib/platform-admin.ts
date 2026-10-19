@@ -124,6 +124,15 @@ export function formatPlanMoney(amount: number, currency: PlanDisplayCurrency) {
   return currency === "USD" ? formatUsd(amount) : formatInr(amount);
 }
 
+/** Free tier: no Razorpay charge. Includes monthly and yearly free plans. */
+export function isFreeCatalogPlan(plan: { slug: string; amount: number }) {
+  const slug = plan.slug.trim().toLowerCase();
+  if (slug === "trial" || slug === "free" || slug.startsWith("free-") || slug.startsWith("trial-")) {
+    return true;
+  }
+  return Number(plan.amount) <= 0;
+}
+
 export function planBillingInterval(plan: {
   billingInterval?: string | null;
   durationDays?: number | null;

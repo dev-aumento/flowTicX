@@ -7,7 +7,7 @@ const UNGATED_PREFIXES = ["/", "/feed", "/settings", "/admin/pricing"];
 const FEATURE_PATHS: Array<{ feature: string; prefixes: string[] }> = [
   { feature: "projects", prefixes: ["/projects"] },
   { feature: "tasks", prefixes: ["/tasks", "/admin/tasks", "/admin/client-tasks", "/task-chats"] },
-  { feature: "time_tracking", prefixes: ["/time-tracking"] },
+  { feature: "time_tracking", prefixes: ["/time-tracking", "/projectpulse"] },
   { feature: "invoices", prefixes: ["/admin/invoices"] },
   { feature: "customers", prefixes: ["/admin/customers"] },
   { feature: "employees", prefixes: ["/admin/employees"] },

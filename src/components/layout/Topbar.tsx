@@ -26,7 +26,7 @@ interface TopbarProps {
   onMenuClick?: () => void;
 }
 
-function AdminSearch({
+export function AdminSearch({
   placeholder = "Search anything...",
   asana = false,
 }: {

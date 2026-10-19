@@ -5,6 +5,7 @@ import { getCollection, hasMongoConfigured, updateById } from "./queries/connect
 import { findUserByEmail } from "./queries/users";
 import { addPlanDuration } from "@/lib/platform-admin";
 import { effectivePlanDurationDays } from "./lib/subscription-access";
+import { isFreeTierPlan } from "./lib/plan-expiry";
 import { findPlatformPlan, listPlatformPlans, upsertPlatformPlan, deletePlatformPlan } from "./lib/platform-plans";
 import { deleteCustomerOrganization } from "./lib/delete-customer-org";
 import { invalidateAuthUserCache } from "./lib/auth";
@@ -75,9 +76,10 @@ function normalizeOrg(
       : catalog?.amount ?? 0;
   const purchasedAt = org.purchasedAt ?? org.createdAt ?? null;
   const planStartsAt = org.planStartsAt ?? purchasedAt;
-  const planExpiresAt = planStartsAt
-    ? addPlanDuration(planStartsAt, plan, effectivePlanDurationDays(org, catalog?.durationDays))
-    : null;
+  const planExpiresAt =
+    isFreeTierPlan(plan) || !planStartsAt
+      ? null
+      : addPlanDuration(planStartsAt, plan, effectivePlanDurationDays(org, catalog?.durationDays));
   return {
     workspaceType,
     plan,
@@ -207,11 +209,13 @@ async function syncPlanDurationForSubscribers(slug: string, durationDays: number
 
   const now = new Date();
   let updatedCount = 0;
+  const unlimited = isFreeTierPlan(slug);
   for (const org of orgs) {
     const start = org.planStartsAt ?? org.purchasedAt ?? org.createdAt ?? now;
-    const nextExpiry = addPlanDuration(new Date(start), slug, durationDays);
+    const nextExpiry = unlimited ? null : addPlanDuration(new Date(start), slug, durationDays);
     const previousExpiry = org.planExpiresAt ? new Date(org.planExpiresAt).getTime() : null;
-    if (previousExpiry === nextExpiry.getTime()) continue;
+    const nextTime = nextExpiry ? nextExpiry.getTime() : null;
+    if (previousExpiry === nextTime) continue;
 
     const updated = await updateById<OrganizationDoc>(Collections.organizations, org.id, {
       planExpiresAt: nextExpiry,
@@ -534,7 +538,9 @@ export const platformRouter = createRouter({
           ? org.subscriptionAmount ?? 0
           : catalog?.amount ?? org.subscriptionAmount ?? 0);
       const planStartsAt = org.planStartsAt ?? org.purchasedAt ?? org.createdAt ?? new Date();
-      const planExpiresAt = addPlanDuration(planStartsAt, input.plan, catalog?.durationDays);
+      const planExpiresAt = isFreeTierPlan(input.plan)
+        ? null
+        : addPlanDuration(planStartsAt, input.plan, catalog?.durationDays);
       const purchasedAt =
         input.planStatus === "paid" && !org.purchasedAt ? new Date() : org.purchasedAt;
       const cancelled =

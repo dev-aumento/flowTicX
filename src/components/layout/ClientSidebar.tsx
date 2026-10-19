@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useLocation } from "react-router";
 import { useAuth } from "@/hooks/useAuth";
+import { isClientPortalUser } from "@/lib/client-portal";
 import { useTaskChatBadgeCount } from "@/hooks/useTaskChats";
 import { requestDashboardRefresh } from "@/lib/dashboard-refresh";
 import { canAccessRoute, hasPermission } from "@/lib/permissions";
@@ -28,6 +29,24 @@ import { cn } from "@/lib/utils";
 
 const PROJECT_DOTS = ["#F06A6A", "#F1BD6C", "#5DA283", "#4573D2", "#9A89C9", "#E362E3"];
 
+export function useClientMoreNavItems(): ClientNavItem[] {
+  const { user } = useAuth();
+  return useMemo(() => {
+    if (!isClientPortalUser(user)) return [];
+    return [
+      { path: "/client/approvals", icon: ClipboardCheck, label: "Approvals" },
+      { path: "/client/reports", icon: BarChart3, label: "Reports" },
+      ...(clientCanViewDueDate(user)
+        ? [{ path: "/client/milestones", icon: Flag, label: "Milestones" }]
+        : []),
+      { path: "/client/invoices", icon: FileText, label: "Invoices" },
+      { path: "/client/files", icon: Files, label: "Files" },
+      { path: "/client/meetings", icon: CalendarDays, label: "Meetings" },
+      { path: "/admin/employees", icon: Users, label: "Team" },
+    ].filter((item) => canAccessRoute(user, item.path));
+  }, [user]);
+}
+
 function navItemClass(active: boolean, collapsed: boolean) {
   return cn(
     "w-full flex items-center gap-2.5 rounded-lg text-[13px] font-medium transition-colors",
@@ -38,7 +57,7 @@ function navItemClass(active: boolean, collapsed: boolean) {
   );
 }
 
-type NavItem = {
+export type ClientNavItem = {
   path: string;
   icon: React.ElementType;
   label: string;
@@ -65,7 +84,7 @@ export function ClientSidebarPanel({
   const workspaceName = org?.name?.trim() || "Workspace";
   const myTasksPath = hasPermission(user, "tasks.view_all") ? "/admin/tasks" : "/tasks";
 
-  const primaryNav: NavItem[] = useMemo(
+  const primaryNav: ClientNavItem[] = useMemo(
     () =>
       [
         { path: "/", icon: Home, label: "Home" },
@@ -80,21 +99,7 @@ export function ClientSidebarPanel({
     [taskChatsCount, myTasksPath, user],
   );
 
-  const moreNav: NavItem[] = useMemo(
-    () =>
-      [
-        { path: "/client/approvals", icon: ClipboardCheck, label: "Approvals" },
-        { path: "/client/reports", icon: BarChart3, label: "Reports" },
-        ...(clientCanViewDueDate(user)
-          ? [{ path: "/client/milestones", icon: Flag, label: "Milestones" }]
-          : []),
-        { path: "/client/invoices", icon: FileText, label: "Invoices" },
-        { path: "/client/files", icon: Files, label: "Files" },
-        { path: "/client/meetings", icon: CalendarDays, label: "Meetings" },
-        { path: "/admin/employees", icon: Users, label: "Team" },
-      ].filter((item) => canAccessRoute(user, item.path)),
-    [user],
-  );
+  const moreNav = useClientMoreNavItems();
 
   const isActive = (path: string) => {
     if (path === "/") return location.pathname === "/";
@@ -121,7 +126,7 @@ export function ClientSidebarPanel({
     onNavigate(path);
   };
 
-  const renderItem = (item: NavItem) => {
+  const renderItem = (item: ClientNavItem) => {
     const active = isActive(item.path);
     return (
       <button
@@ -262,7 +267,7 @@ export function ClientSidebarPanel({
         </button>
         <button
           type="button"
-          onClick={logout}
+          onClick={() => logout()}
           className={navItemClass(false, collapsed)}
         >
           <LogOut size={18} strokeWidth={1.75} />

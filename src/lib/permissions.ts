@@ -85,6 +85,7 @@ function isClientRestrictedPath(path: string): boolean {
   if (path === "/qr-code" || path.startsWith("/qr-code")) return true;
   if (path === "/recent-employees" || path.startsWith("/recent-employees")) return true;
   if (path === "/time-tracking" || path.startsWith("/time-tracking")) return true;
+  if (path === "/projectpulse" || path.startsWith("/projectpulse/")) return true;
   if (path === "/analytics" || path.startsWith("/analytics")) return true;
   if (path === "/admin/permissions" || path.startsWith("/admin/permissions")) return true;
   if (path === "/admin/manage-data" || path.startsWith("/admin/manage-data")) return true;

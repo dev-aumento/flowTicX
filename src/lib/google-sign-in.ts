@@ -102,7 +102,11 @@ export function startGoogleSignIn({ onEmail, onCancel, onError }: GoogleSignInHa
         return;
       }
       if (error.type === "popup_failed_to_open") {
-        onError("Allow popups for this site, then try Google sign-in again.");
+        onError(
+          navigator.userAgent.includes("AASOAndroid")
+            ? "Google sign-in is unavailable inside the app. Sign in with your email and password."
+            : "Allow popups for this site, then try Google sign-in again.",
+        );
         return;
       }
       onError("Google sign-in could not be completed. Try again.");

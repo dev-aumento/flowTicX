@@ -37,9 +37,15 @@ import { runClockInWithLocation } from "@/lib/clock-in-with-location";
 import { toast } from "sonner";
 import { useTaskStatusLabels } from "@/hooks/useTaskStatusLabels";
 import { hasPlanFeature } from "@/lib/plan-features";
+import { isNativeApp } from "@/lib/native-shell";
+import { NativeHomeScreen } from "@/components/dashboard/NativeHomeScreen";
 
 export default function Dashboard() {
   const { user } = useAuth();
+
+  if (isNativeApp() && !isFinanceRoleOnly(user) && !isClientPortalUser(user)) {
+    return <NativeHomeScreen />;
+  }
 
   if (isFinanceRoleOnly(user)) {
     return <FinanceDashboard />;

@@ -57,6 +57,8 @@ import RecentEmployees from './pages/RecentEmployees'
 import InviteAccept from './pages/InviteAccept'
 import Login from './pages/Login'
 import FinanceLogin from './pages/FinanceLogin'
+import ProjectPulse from './pages/ProjectPulse'
+import ProjectPulseLogin from './pages/ProjectPulseLogin'
 import ClientLogin from './pages/ClientLogin'
 import PlatformLogin from './pages/PlatformLogin'
 import PlanEnded from './pages/PlanEnded'
@@ -120,6 +122,9 @@ function RequireAuth() {
       return <Navigate to="/plan-ended" replace />
     }
     const cached = readAuthCache()
+    if (location.pathname.startsWith('/projectpulse')) {
+      return <Navigate to="/projectpulse/login" replace />
+    }
     const fallback = location.pathname.startsWith('/platform') ? '/admin/login' : LOGIN_PATH
     return <Navigate to={getLoginPathForUser(cached) || fallback} replace />
   }
@@ -263,11 +268,13 @@ export default function App() {
           </GuestOnly>
         }
       />
+      <Route path="/projectpulse/login" element={<ProjectPulseLogin />} />
       <Route path="/plan-ended" element={<PlanEnded />} />
       <Route path="/pricing" element={<RenewPricing />} />
       <Route path="/invite/:token" element={<InviteAccept />} />
 
       <Route element={<RequireAuth />}>
+        <Route path="/projectpulse" element={<ProjectPulse />} />
         <Route path="/platform" element={<PlatformLayout />}>
           <Route index element={<PlatformOverview />} />
           <Route path="clients" element={<PlatformClients />} />

@@ -38,8 +38,13 @@ export function useLayoutMode(): LayoutMode {
 
   useEffect(() => {
     const onResize = () => setMode(readLayoutMode());
+    onResize();
     window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
+    window.visualViewport?.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      window.visualViewport?.removeEventListener("resize", onResize);
+    };
   }, []);
 
   return mode;

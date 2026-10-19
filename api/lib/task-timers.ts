@@ -92,6 +92,7 @@ export async function pauseAllRunningTaskTimersForUser(
       userId,
       taskId: { $ne: null },
       clockOut: null,
+      source: { $ne: "projectpulse" },
     })
     .toArray();
 
@@ -129,6 +130,7 @@ export async function pauseOtherRunningTaskTimers(
       userId: user.id,
       taskId: { $ne: exceptTaskId, $type: "number" },
       clockOut: null,
+      source: { $ne: "projectpulse" },
     })
     .toArray();
 

@@ -15,7 +15,7 @@ export type SexOption = "male" | "female" | "other" | "prefer_not_to_say";
 export type ProjectStatus = "active" | "archived" | "completed";
 export type TaskStatus = "todo" | "in_progress" | "review" | "done";
 export type TaskPriority = "low" | "medium" | "high" | "urgent";
-export type TimeEntrySource = "web" | "mobile" | "manual";
+export type TimeEntrySource = "web" | "mobile" | "manual" | "projectpulse";
 export type InviteStatus = "pending" | "accepted" | "expired" | "revoked";
 
 export type TaskActivityAction =

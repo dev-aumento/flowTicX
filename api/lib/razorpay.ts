@@ -18,9 +18,12 @@ export function readRazorpayWebhookSecret() {
   return process.env.RAZORPAY_WEBHOOK_SECRET?.trim() ?? "";
 }
 
-/** Trial and zero-rupee plans start without a charge. */
+/** Trial, Free, and zero-rupee plans start without a charge. */
 export function planRequiresPayment(plan: { slug: string; amount: number }) {
-  if (plan.slug.trim().toLowerCase() === "trial") return false;
+  const slug = plan.slug.trim().toLowerCase();
+  if (slug === "trial" || slug === "free" || slug.startsWith("free-") || slug.startsWith("trial-")) {
+    return false;
+  }
   return Number(plan.amount) > 0;
 }
 

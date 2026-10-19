@@ -19,7 +19,7 @@ export function PlanIntervalTabs({
             "h-9 rounded-lg px-4 text-sm font-semibold transition-colors",
             value === interval
               ? "bg-white text-[#111827] shadow-sm dark:bg-[#0F172A] dark:text-white"
-              : "text-[#6B7280] hover:text-[#111827] dark:hover:text-white",
+              : "text-[#374151] hover:text-[#111827] dark:text-[#E5E7EB] dark:hover:text-white",
           )}
         >
           {planIntervalLabel(interval)}

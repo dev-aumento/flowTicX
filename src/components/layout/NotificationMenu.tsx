@@ -39,11 +39,12 @@ type NotificationItem = {
 export function NotificationMenu({
   variant = "default",
 }: {
-  variant?: "default" | "admin" | "client";
+  variant?: "default" | "admin" | "client" | "native";
 }) {
   const { user } = useAuth();
   const admin = variant === "admin";
   const client = variant === "client";
+  const native = variant === "native";
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const utils = trpc.useUtils();
@@ -127,7 +128,9 @@ export function NotificationMenu({
         <button
           type="button"
           className={
-            client
+            native
+              ? "relative grid h-12 w-12 place-items-center rounded-2xl bg-[#1C1C1E] text-white"
+              : client
               ? "relative w-9 h-9 flex items-center justify-center rounded-lg hover:bg-[#EDEAE6] dark:hover:bg-white/8 transition-colors"
               : admin
                 ? "relative w-10 h-10 flex items-center justify-center rounded-xl hover:bg-gray-100 dark:hover:bg-white/5 transition-colors"
@@ -136,16 +139,21 @@ export function NotificationMenu({
           aria-label="Notifications"
         >
           <Bell
-            size={client ? 18 : 20}
+            size={native ? 22 : client ? 18 : 20}
             className={
-              client
+              native
+                ? "text-white"
+                : client
                 ? "text-[#6D6E6F] dark:text-[#D0CFCD]"
                 : admin
                   ? "text-gray-500 dark:text-slate-400"
                   : "text-gray-500 dark:text-gray-400"
             }
           />
-          {unreadCount > 0 && (
+          {native && unreadCount > 0 ? (
+            <span className="absolute right-2.5 top-2.5 h-2.5 w-2.5 rounded-full bg-[#F5C542] ring-2 ring-[#1C1C1E]" />
+          ) : null}
+          {!native && unreadCount > 0 && (
             <span
               className={
                 client || admin

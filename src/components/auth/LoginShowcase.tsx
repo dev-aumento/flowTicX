@@ -120,4 +120,4 @@ function ProductPreview() {
       className="block h-auto max-h-full w-full object-contain object-bottom"
     />
   );
-}
+}   

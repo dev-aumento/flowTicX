@@ -3,6 +3,7 @@ import { Collections } from "@db/mongo/collections";
 import type { OrganizationDoc, SafeUser, SubscriptionPlan, SubscriptionStatus, UserDoc, WorkspaceType } from "@db/mongo/types";
 import { Workspace } from "@contracts/constants";
 import { addPlanDuration } from "@/lib/platform-admin";
+import { isFreeTierPlan } from "./plan-expiry";
 import { findById, getCollection, hasMongoConfigured, insertDoc, updateById } from "../queries/connection";
 
 export type { WorkspaceType };
@@ -62,7 +63,7 @@ export async function createOrganization(
     introEnterprise: options?.introEnterprise ?? false,
     purchasedAt: options?.purchasedAt ?? (isCustomer ? now : null),
     planStartsAt: isCustomer ? now : null,
-    planExpiresAt: isCustomer ? addPlanDuration(now, plan ?? "trial") : null,
+    planExpiresAt: isCustomer && !isFreeTierPlan(plan) ? addPlanDuration(now, plan ?? "trial") : null,
     createdBy,
     createdAt: now,
     updatedAt: now,

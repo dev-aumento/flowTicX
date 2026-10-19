@@ -32,6 +32,10 @@ export default defineConfig(({ mode }) => {
     react()],
   server: {
     port: 3000,
+    host: true,
+    watch: {
+      ignored: ["**/android/**"],
+    },
   },
   resolve: {
     alias: {

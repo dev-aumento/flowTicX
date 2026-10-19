@@ -1,10 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { useNavigate } from "react-router";
 import { Loader2 } from "lucide-react";
 import { trpc } from "@/providers/trpc";
+import { useAuth } from "@/hooks/useAuth";
 import {
   formatPlanDate,
   formatPlanDuration,
   formatPlanMoney,
+  isFreeCatalogPlan,
   planBillingInterval,
   planIntervalLabel,
   sortPlansByPrice,
@@ -15,10 +18,15 @@ import {
 import { PlanPricingCard } from "@/components/billing/PlanPricingCard";
 import { PlanIntervalTabs } from "@/components/billing/PlanIntervalTabs";
 import { completePlanCheckout, RazorpayCheckoutClosed } from "@/lib/razorpay-checkout";
+import { getDefaultHomePath } from "@/lib/permissions";
+import { clearPlanEndedNotice } from "@/lib/plan-ended";
+import { writeAuthCache } from "@/lib/auth-cache";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 export default function AdminPricing() {
+  const navigate = useNavigate();
+  const { user } = useAuth();
   const utils = trpc.useUtils();
   const { data: plans, isLoading } = trpc.subscription.plans.useQuery();
   const { data: current } = trpc.subscription.current.useQuery();
@@ -28,15 +36,8 @@ export default function AdminPricing() {
 
   const currency = "INR" as const;
   const [interval, setInterval] = useState<PlanBillingInterval>("month");
-  const [syncedInterval, setSyncedInterval] = useState(false);
   const currentSlug = current?.plan ?? "";
   const activePlan = (plans ?? []).find((plan) => plan.slug === currentSlug);
-
-  useEffect(() => {
-    if (syncedInterval || !activePlan) return;
-    setInterval(planBillingInterval(activePlan));
-    setSyncedInterval(true);
-  }, [activePlan, syncedInterval]);
 
   const visiblePlans = useMemo(
     () =>
@@ -76,9 +77,19 @@ export default function AdminPricing() {
                     : 0,
                 currency,
               )}
-              {activePlan ? ` · ${planIntervalLabel(planBillingInterval(activePlan))}` : ""}
-              {current.durationDays ? ` · ${formatPlanDuration(current.durationDays)}` : ""}
-              {current.planExpiresAt ? ` · Ends ${formatPlanDate(current.planExpiresAt)}` : ""}
+              {activePlan && !isFreeCatalogPlan(activePlan)
+                ? ` · ${planIntervalLabel(planBillingInterval(activePlan))}`
+                : ""}
+              {activePlan && isFreeCatalogPlan(activePlan)
+                ? " · No time limit"
+                : current.durationDays
+                  ? ` · ${formatPlanDuration(current.durationDays)}`
+                  : ""}
+              {!activePlan || !isFreeCatalogPlan(activePlan)
+                ? current.planExpiresAt
+                  ? ` · Ends ${formatPlanDate(current.planExpiresAt)}`
+                  : ""
+                : ""}
             </p>
           </div>
         </section>
@@ -111,6 +122,35 @@ export default function AdminPricing() {
                     type="button"
                     disabled={selected || pendingSlug != null}
                     onClick={() => {
+                      const chosen = (plans ?? []).find((item) => item.slug === plan.slug);
+                      if (chosen && isFreeCatalogPlan(chosen)) {
+                        setPendingSlug(plan.slug);
+                        void beginCheckout
+                          .mutateAsync({ slug: plan.slug })
+                          .then(async (result) => {
+                            if (result.needsAccount || result.requiresPayment) {
+                              navigate(`/login?plan=${encodeURIComponent(plan.slug)}`);
+                              return;
+                            }
+                            if (result.renewedSession && result.user) {
+                              writeAuthCache(result.user);
+                              utils.auth.me.setData(undefined, result.user);
+                              clearPlanEndedNotice();
+                              await utils.invalidate();
+                              navigate(getDefaultHomePath(result.user), { replace: true });
+                              return;
+                            }
+                            clearPlanEndedNotice();
+                            await utils.auth.me.invalidate();
+                            toast.success(`${result.planName ?? plan.name} is now active`);
+                            navigate(getDefaultHomePath(user), { replace: true });
+                          })
+                          .catch((error: unknown) => {
+                            toast.error(error instanceof Error ? error.message : "The free plan could not be started");
+                          })
+                          .finally(() => setPendingSlug(null));
+                        return;
+                      }
                       setPendingSlug(plan.slug);
                       void completePlanCheckout(
                         plan.slug,

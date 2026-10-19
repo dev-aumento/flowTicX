@@ -16,7 +16,7 @@ import { clearPlanRenewalCookie, userFromPlanRenewalCookie } from "./lib/plan-re
 import { createSessionForUser } from "./lib/auth";
 import { toSessionUser } from "./lib/client-workspace";
 import { findUserById } from "./queries/users";
-import { verifyPaymentSignature, readRazorpayKeys } from "./lib/razorpay";
+import { verifyPaymentSignature, readRazorpayKeys, planRequiresPayment } from "./lib/razorpay";
 import {
   assertComplimentaryPlan,
   fulfillSubscriptionCheckout,
@@ -56,10 +56,15 @@ export const subscriptionRouter = createRouter({
     const access = await resolveOrgPlanAccess(settled);
     const catalog = access.plan ? await findPlatformPlan(access.plan) : null;
     const planStartsAt = settled.planStartsAt ?? settled.purchasedAt ?? settled.createdAt ?? null;
-    const durationDays = effectivePlanDurationDays(settled, catalog?.durationDays) ?? null;
-    const planExpiresAt = planStartsAt
-      ? addPlanDuration(new Date(planStartsAt), settled.plan ?? "trial", durationDays ?? undefined)
-      : settled.planExpiresAt ?? null;
+    const unlimited = isFreeTierPlan(settled.plan);
+    const durationDays = unlimited
+      ? null
+      : effectivePlanDurationDays(settled, catalog?.durationDays) ?? null;
+    const planExpiresAt = unlimited
+      ? null
+      : planStartsAt
+        ? addPlanDuration(new Date(planStartsAt), settled.plan ?? "trial", durationDays ?? undefined)
+        : settled.planExpiresAt ?? null;
     const daysRemaining =
       planExpiresAt && !isFreeTierPlan(settled.plan)
         ? planDaysRemaining(new Date(planExpiresAt))
@@ -97,11 +102,51 @@ export const subscriptionRouter = createRouter({
   beginCheckout: publicQuery
     .input(z.object({ slug: z.string().min(1).max(64) }))
     .mutation(async ({ ctx, input }) => {
+      const catalog = await findPlatformPlan(input.slug);
+      if (!catalog) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Plan not found" });
+      }
       const payer = await resolvePlanPayer(ctx);
+
+      if (!planRequiresPayment(catalog)) {
+        if (!payer) {
+          return {
+            requiresPayment: false as const,
+            needsAccount: true as const,
+            renewedSession: false,
+            organizationId: 0,
+            organizationName: "",
+            plan: catalog.slug,
+            planName: catalog.name,
+            planStatus: "trial" as const,
+            planFeatures: null,
+            planLimits: catalog.limits,
+            subscriptionAmount: 0,
+            planStartsAt: null,
+            planExpiresAt: null,
+            durationDays: null,
+            user: null,
+            token: null,
+            accountEmail: null,
+            accountNext: null as null,
+          };
+        }
+        const plan = await activateOrganizationPlan({
+          org: payer.org,
+          slug: catalog.slug,
+          actorId: payer.user.id,
+        });
+        return {
+          ...(await attachRenewalSession(ctx, payer.user.id, payer.restoreSession, plan)),
+          needsAccount: false as const,
+        };
+      }
+
       if (!payer) {
         const started = await startGuestCheckout(input.slug);
         return {
           requiresPayment: true as const,
+          needsAccount: false as const,
           keyId: started.keyId,
           orderId: started.orderId,
           amount: started.amount,
@@ -118,13 +163,17 @@ export const subscriptionRouter = createRouter({
           slug: input.slug,
           actorId: payer.user.id,
         });
-        return attachRenewalSession(ctx, payer.user.id, payer.restoreSession, plan);
+        return {
+          ...(await attachRenewalSession(ctx, payer.user.id, payer.restoreSession, plan)),
+          needsAccount: false as const,
+        };
       }
 
       const started = await startSubscriptionCheckout({ payer, slug: input.slug });
       if (started.kind === "payment") {
         return {
           requiresPayment: true as const,
+          needsAccount: false as const,
           keyId: started.keyId,
           orderId: started.orderId,
           amount: started.amount,
@@ -140,7 +189,10 @@ export const subscriptionRouter = createRouter({
         slug: started.catalog.slug,
         actorId: payer.user.id,
       });
-      return attachRenewalSession(ctx, payer.user.id, payer.restoreSession, plan);
+      return {
+        ...(await attachRenewalSession(ctx, payer.user.id, payer.restoreSession, plan)),
+        needsAccount: false as const,
+      };
     }),
 
   confirmPayment: publicQuery

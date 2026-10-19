@@ -175,6 +175,10 @@ export default function Login() {
         setStep("workspaces");
         return;
       }
+      if (selectedPlan && !result.portal && !result.inactive) {
+        setMode("admin");
+        return;
+      }
       setWorkspaces([]);
       setPortalHint(result.portal);
       setInactiveAccount(result.inactive);

@@ -1,5 +1,6 @@
 import * as cookie from "cookie";
 import { Session } from "@contracts/constants";
+import { isLocalDevHost } from "./cookies";
 
 /** Readable by aaso.tech. Display data only — never a session or token. */
 export const HINT_COOKIE = "aaso_user";
@@ -36,9 +37,7 @@ export function requestPublicOrigin(headers: Headers, url?: string) {
   if (hostHeader) {
     const forwardedProto = headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
     const hostname = hostHeader.split(":")[0]?.toLowerCase() ?? "";
-    const proto =
-      forwardedProto ||
-      (hostname === "localhost" || hostname === "127.0.0.1" ? "http" : "https");
+    const proto = forwardedProto || (isLocalDevHost(hostname) ? "http" : "https");
     return `${proto}://${hostHeader}`.replace(/\/$/, "");
   }
   try {
@@ -95,7 +94,7 @@ export function buildHintPayload(
 
 function hintCookieOptions(headers: Headers) {
   const hostname = requestHostname(headers);
-  const local = hostname === "localhost" || hostname === "127.0.0.1";
+  const local = isLocalDevHost(hostname);
   const domain = hintCookieDomain(hostname);
   return {
     path: "/",

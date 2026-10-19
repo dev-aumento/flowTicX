@@ -32,8 +32,9 @@ export async function activateOrganizationPlan(input: {
 
   const now = new Date();
   const startsAt = now;
-  const expiresAt = addPlanDuration(startsAt, catalog.slug, catalog.durationDays);
-  const isTrial = catalog.slug === "trial" || catalog.amount === 0;
+  const unlimited = !planRequiresPayment(catalog);
+  const expiresAt = unlimited ? null : addPlanDuration(startsAt, catalog.slug, catalog.durationDays);
+  const isTrial = unlimited;
   const planStatus = isTrial ? "trial" : input.paymentConfirmed ? "paid" : input.org.planStatus === "paid" ? "paid" : "unpaid";
 
   const updated = await updateById<OrganizationDoc>(Collections.organizations, input.org.id, {
@@ -74,7 +75,7 @@ export async function activateOrganizationPlan(input: {
   }
 
   const access = await resolveOrgPlanAccess(updated);
-  return presentActivatedPlan(updated, access, catalog.durationDays, startsAt, expiresAt);
+  return presentActivatedPlan(updated, access, unlimited ? null : catalog.durationDays, startsAt, expiresAt);
 }
 
 /** One free month of the plan the customer chose. Payment starts only after that month. */
@@ -144,9 +145,9 @@ export async function startSelectedPlanTrial(input: {
 function presentActivatedPlan(
   updated: OrganizationDoc,
   access: Awaited<ReturnType<typeof resolveOrgPlanAccess>>,
-  durationDays: number,
+  durationDays: number | null,
   startsAt: Date,
-  expiresAt: Date,
+  expiresAt: Date | null,
 ) {
   return {
     organizationId: updated.id,
@@ -154,7 +155,7 @@ function presentActivatedPlan(
     ...access,
     subscriptionAmount: updated.subscriptionAmount ?? 0,
     planStartsAt: updated.planStartsAt ?? startsAt,
-    planExpiresAt: updated.planExpiresAt ?? expiresAt,
+    planExpiresAt: expiresAt,
     durationDays,
   };
 }

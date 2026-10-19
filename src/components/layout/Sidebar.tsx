@@ -28,6 +28,7 @@ import {
   FolderKanban,
   MessageSquare,
   Clock,
+  Timer,
   CalendarDays,
   ClipboardCheck,
   UserMinus,
@@ -58,7 +59,7 @@ interface SidebarProps {
   onDrawerOpenChange: (open: boolean) => void;
 }
 
-type NavItem = {
+export type NavItem = {
   path: string;
   icon: React.ElementType;
   label: string;
@@ -88,19 +89,8 @@ function isLeadershipSidebarUser(
   return isAdminOrManagement(user);
 }
 
-function SidebarPanel({
-  collapsed,
-  showCollapseToggle,
-  onToggle,
-  onNavigate,
-}: {
-  collapsed: boolean;
-  showCollapseToggle: boolean;
-  onToggle: () => void;
-  onNavigate: (path: string) => void;
-}) {
-  const location = useLocation();
-  const { user, logout } = useAuth();
+export function useWorkspaceNavItems() {
+  const { user } = useAuth();
   const taskChatsCount = useTaskChatBadgeCount();
   const leadershipNav = isLeadershipSidebarUser(user);
 
@@ -143,6 +133,7 @@ function SidebarPanel({
           label: "Time & Hours",
           section: "WORK",
         },
+        { path: "/projectpulse", icon: Timer, label: "ProjectPulse", section: "WORK" },
         ...(!hidePersonalNav
           ? [
               {
@@ -247,6 +238,7 @@ function SidebarPanel({
         icon: Clock,
         label: hidePersonalNav ? "Employee Hours" : "Time Tracking",
       },
+      { path: "/projectpulse", icon: Timer, label: "ProjectPulse" },
       { path: "/admin/employees", icon: Users, label: "Employees" },
       { path: "/admin/permissions", icon: Shield, label: "Permissions" },
       { path: "/admin/manage-data", icon: Database, label: "Manage data" },
@@ -306,6 +298,25 @@ function SidebarPanel({
     }
     return true;
   });
+
+  return visibleNav;
+}
+
+function SidebarPanel({
+  collapsed,
+  showCollapseToggle,
+  onToggle,
+  onNavigate,
+}: {
+  collapsed: boolean;
+  showCollapseToggle: boolean;
+  onToggle: () => void;
+  onNavigate: (path: string) => void;
+}) {
+  const location = useLocation();
+  const { user, logout } = useAuth();
+  const leadershipNav = isLeadershipSidebarUser(user);
+  const visibleNav = useWorkspaceNavItems();
 
   const useGroupedNav = leadershipNav || isFinanceRoleOnly(user);
 
@@ -482,7 +493,7 @@ function SidebarPanel({
 
         <button
           type="button"
-          onClick={logout}
+          onClick={() => logout()}
           className={navItemClass(false)}
         >
           <LogOut size={20} strokeWidth={1.75} className="shrink-0" />

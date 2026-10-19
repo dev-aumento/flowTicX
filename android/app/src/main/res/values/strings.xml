@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">AASO</string>
+    <string name="title_activity_main">AASO</string>
+    <string name="package_name">tech.aaso.app</string>
+    <string name="custom_url_scheme">tech.aaso.app</string>
+</resources>

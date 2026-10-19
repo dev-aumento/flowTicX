@@ -25,6 +25,8 @@ import { notifyTaskMembers, notifyTaskStakeholders } from "./lib/notify-task-mem
 import { assertPermission, assertCanChangeTaskAssignee, assertAnyPermission, hasPermission, canViewClientTasks } from "./lib/permissions";
 import { isProjectMember, canViewProjectTasks } from "./queries/project-members";
 import { defaultTaskDeadlineIso, formatDueLabel } from "@/lib/task-deadline";
+import { dayBounds, startOfCalendarWeek } from "@/lib/work-hours-policy";
+import { workZoneDateKey, workZoneDateParts, workZoneWallTimeToUtc } from "@/lib/timezone";
 import { Collections } from "@db/mongo/collections";
 import type {
   UserDoc,
@@ -174,6 +176,77 @@ async function findUsersByIds(ids: number[]): Promise<Map<number, SafeUser>> {
 function attachmentMeta(doc: TaskAttachmentDoc) {
   const { dataBase64: _data, gridFsId: _grid, ...meta } = doc;
   return meta;
+}
+
+type TimesheetEntry = {
+  id: number;
+  clockIn: Date;
+  clockOut: Date | null;
+  durationSeconds: number;
+  note: string | null;
+  running: boolean;
+};
+
+type TimesheetTask = {
+  taskId: number;
+  title: string;
+  totalSeconds: number;
+  entries: TimesheetEntry[];
+};
+
+type TimesheetProject = {
+  projectId: number | null;
+  projectName: string;
+  color: string | null;
+  totalSeconds: number;
+  tasks: TimesheetTask[];
+};
+
+type TimesheetRunning = {
+  entryId: number;
+  taskId: number;
+  taskTitle: string;
+  projectId: number | null;
+  projectName: string;
+  startedAt: Date;
+  note: string | null;
+};
+
+type TimesheetWeekRow = {
+  projectId: number | null;
+  projectName: string;
+  taskId: number;
+  title: string;
+  hourType: string | null;
+  days: number[];
+  totalSeconds: number;
+};
+
+const TIMESHEET_HOUR_TYPES = [
+  "Design",
+  "Marketing",
+  "Programming",
+  "Project Management",
+  "Admin",
+  "Internal",
+  "Meetings",
+];
+
+function timesheetHourType(note: string | null | undefined) {
+  if (!note) return null;
+  const parts = note.split(" · ").map((part) => part.trim()).filter(Boolean);
+  const selected = parts[parts.length - 1];
+  return selected && TIMESHEET_HOUR_TYPES.includes(selected) ? selected : null;
+}
+
+function timesheetEntrySeconds(entry: TimeEntryDoc, now: Date) {
+  if (!entry.clockOut) {
+    return Math.max(0, Math.floor((now.getTime() - entry.clockIn.getTime()) / 1000));
+  }
+  if (typeof entry.durationSeconds === "number" && entry.durationSeconds >= 0) {
+    return entry.durationSeconds;
+  }
+  return Math.max(0, Math.floor((entry.clockOut.getTime() - entry.clockIn.getTime()) / 1000));
 }
 
 /** Files section / task.attachments: exclude comment-only media. */
@@ -475,7 +548,7 @@ export const taskRouter = createRouter({
       await ensureSchema();
       const timeCol = await getCollection<TimeEntryDoc>(Collections.timeEntries);
       const entries = await timeCol
-        .find({ taskId: input.taskId })
+        .find({ taskId: input.taskId, source: { $ne: "projectpulse" } })
         .sort({ clockIn: -1 })
         .toArray();
 
@@ -1401,6 +1474,7 @@ export const taskRouter = createRouter({
           userId: ctx.user.id,
           taskId: input.taskId,
           clockOut: null,
+          source: { $ne: "projectpulse" },
         })
         .sort({ clockIn: -1 })
         .limit(1)
@@ -1409,6 +1483,207 @@ export const taskRouter = createRouter({
       return entry
         ? { taskId: input.taskId, startedAt: entry.clockIn, paused: false, accumulatedSeconds: 0 }
         : null;
+    }),
+
+  /**
+   * Harvest-style day timesheet: task timers and manual entries for one user,
+   * rolled up by project and by task. Attendance clock-ins (taskId null) are excluded.
+   */
+  getTimesheet: authedQuery
+    .input(z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }))
+    .query(async ({ ctx, input }) => {
+      const emptyWeek = () => {
+        const { start } = dayBounds(input.date);
+        const weekStart = startOfCalendarWeek(start);
+        const { year, month, day } = workZoneDateParts(weekStart);
+        return Array.from({ length: 7 }, (_, index) => ({
+          date: workZoneDateKey(workZoneWallTimeToUtc(year, month, day + index, 12)),
+          totalSeconds: 0,
+        }));
+      };
+
+      if (useTaskMock()) {
+        return {
+          date: input.date,
+          totalSeconds: 0,
+          week: emptyWeek(),
+          projects: [] as TimesheetProject[],
+          weekRows: [] as TimesheetWeekRow[],
+          running: null as TimesheetRunning | null,
+        };
+      }
+
+      await ensureSchema();
+      const now = new Date();
+      const week = emptyWeek();
+      const weekStart = dayBounds(week[0]!.date).start;
+      const weekEnd = dayBounds(week[6]!.date).end;
+      const timeCol = await getCollection<TimeEntryDoc>(Collections.timeEntries);
+      const ranged = await timeCol
+        .find({
+          userId: ctx.user.id,
+          taskId: { $ne: null, $type: "number" },
+          source: "projectpulse",
+          clockIn: { $gte: weekStart, $lte: weekEnd },
+        })
+        .sort({ clockIn: 1 })
+        .toArray();
+      const open = await timeCol
+        .find({
+          userId: ctx.user.id,
+          taskId: { $ne: null, $type: "number" },
+          source: "projectpulse",
+          clockOut: null,
+        })
+        .sort({ clockIn: -1 })
+        .limit(1)
+        .toArray();
+      const byId = new Map<number, TimeEntryDoc>();
+      for (const entry of [...ranged, ...open]) byId.set(entry.id, entry);
+      const entries = [...byId.values()];
+
+      const taskIds = [...new Set(entries.map((entry) => entry.taskId).filter((id): id is number => id != null))];
+      const taskCol = await getCollection<TaskDoc>(Collections.tasks);
+      const tasks = taskIds.length
+        ? await taskCol.find({ id: { $in: taskIds } }).project({ id: 1, title: 1, projectId: 1 }).toArray()
+        : [];
+      const taskMap = new Map(tasks.map((task) => [task.id, task]));
+      const projectIds = [...new Set(
+        [
+          ...tasks.map((task) => task.projectId),
+          ...entries.map((entry) => entry.projectId),
+        ].filter((id): id is number => id != null),
+      )];
+      const projectCol = await getCollection<ProjectDoc>(Collections.projects);
+      const projects = projectIds.length
+        ? await projectCol.find({ id: { $in: projectIds } }).project({ id: 1, name: 1, color: 1 }).toArray()
+        : [];
+      const projectMap = new Map(projects.map((project) => [project.id, project]));
+
+      const weekSeconds = new Map(week.map((day) => [day.date, 0]));
+      const weekRowMap = new Map<string, TimesheetWeekRow>();
+      const projectBuckets = new Map<string, TimesheetProject>();
+
+      let running: TimesheetRunning | null = null;
+      for (const entry of entries) {
+        if (entry.taskId == null) continue;
+        const task = taskMap.get(entry.taskId);
+        const projectId = entry.projectId ?? task?.projectId ?? null;
+        const project = projectId != null ? projectMap.get(projectId) : null;
+        const seconds = timesheetEntrySeconds(entry, now);
+        const dayKey = workZoneDateKey(entry.clockIn);
+        const dayIndex = week.findIndex((day) => day.date === dayKey);
+        if (dayIndex >= 0) {
+          weekSeconds.set(dayKey, (weekSeconds.get(dayKey) ?? 0) + seconds);
+          const hourType = timesheetHourType(entry.note);
+          const rowKey = `${projectId ?? "none"}:${entry.taskId}:${hourType ?? ""}`;
+          let weekRow = weekRowMap.get(rowKey);
+          if (!weekRow) {
+            weekRow = {
+              projectId,
+              projectName: project?.name ?? "No project",
+              taskId: entry.taskId,
+              title: task?.title ?? "Task",
+              hourType,
+              days: [0, 0, 0, 0, 0, 0, 0],
+              totalSeconds: 0,
+            };
+            weekRowMap.set(rowKey, weekRow);
+          }
+          weekRow.days[dayIndex] = (weekRow.days[dayIndex] ?? 0) + seconds;
+          weekRow.totalSeconds += seconds;
+        }
+
+        const bucketKey = projectId == null ? "none" : String(projectId);
+        let bucket = projectBuckets.get(bucketKey);
+        if (!bucket) {
+          bucket = {
+            projectId,
+            projectName: project?.name ?? "No project",
+            color: project?.color ?? null,
+            totalSeconds: 0,
+            tasks: [],
+          };
+          projectBuckets.set(bucketKey, bucket);
+        }
+        let taskBucket = bucket.tasks.find((item) => item.taskId === entry.taskId);
+        if (!taskBucket) {
+          taskBucket = {
+            taskId: entry.taskId,
+            title: task?.title ?? "Task",
+            totalSeconds: 0,
+            entries: [],
+          };
+          bucket.tasks.push(taskBucket);
+        }
+        const isRunning = entry.clockOut == null;
+        if (dayKey === input.date) {
+          taskBucket.entries.push({
+            id: entry.id,
+            clockIn: entry.clockIn,
+            clockOut: entry.clockOut,
+            durationSeconds: seconds,
+            note: entry.note,
+            running: isRunning,
+          });
+          bucket.totalSeconds += seconds;
+          taskBucket.totalSeconds += seconds;
+        }
+        if (isRunning) {
+          running = {
+            entryId: entry.id,
+            taskId: entry.taskId,
+            taskTitle: task?.title ?? "Task",
+            projectId,
+            projectName: project?.name ?? "No project",
+            startedAt: entry.clockIn,
+            note: entry.note,
+          };
+        }
+      }
+
+      const dayProjects = [...projectBuckets.values()]
+        .map((project) => ({
+          ...project,
+          tasks: project.tasks
+            .map((task) => ({
+              ...task,
+              entries: task.entries.filter((entry) => entry.running || workZoneDateKey(entry.clockIn) === input.date),
+            }))
+            .filter((task) => task.entries.length > 0),
+        }))
+        .filter((project) => project.tasks.length > 0)
+        .sort((a, b) => a.projectName.localeCompare(b.projectName));
+
+      return {
+        date: input.date,
+        totalSeconds: dayProjects.reduce((sum, project) => sum + project.totalSeconds, 0),
+        week: week.map((day) => ({ date: day.date, totalSeconds: weekSeconds.get(day.date) ?? 0 })),
+        projects: dayProjects,
+        weekRows: [...weekRowMap.values()]
+          .filter((row) => row.totalSeconds > 0)
+          .sort((a, b) => a.projectName.localeCompare(b.projectName) || a.title.localeCompare(b.title)),
+        running,
+      };
+    }),
+
+  getProjectPulseTotal: authedQuery
+    .input(z.object({ taskId: z.number() }))
+    .query(async ({ ctx, input }) => {
+      if (useTaskMock()) return { totalSeconds: 0 };
+      await ensureSchema();
+      const timeCol = await getCollection<TimeEntryDoc>(Collections.timeEntries);
+      const entries = await timeCol
+        .find({
+          userId: ctx.user.id,
+          taskId: input.taskId,
+          source: "projectpulse",
+        })
+        .toArray();
+      const now = new Date();
+      return {
+        totalSeconds: entries.reduce((sum, entry) => sum + timesheetEntrySeconds(entry, now), 0),
+      };
     }),
 
   getMyActiveTimer: authedQuery.query(async ({ ctx }) => {
@@ -1422,6 +1697,7 @@ export const taskRouter = createRouter({
         userId: ctx.user.id,
         taskId: { $ne: null, $type: "number" },
         clockOut: null,
+        source: { $ne: "projectpulse" },
       })
       .sort({ clockIn: -1 })
       .limit(1)
@@ -1448,6 +1724,10 @@ export const taskRouter = createRouter({
         taskId: z.number(),
         /** Client click time — used so slow server work does not steal tracked seconds. */
         clientStartedAt: z.coerce.date().optional(),
+        /** ProjectPulse time stays out of the task time log. */
+        ledger: z.enum(["task", "projectpulse"]).optional(),
+        note: z.string().optional(),
+        projectId: z.number().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -1476,15 +1756,41 @@ export const taskRouter = createRouter({
         throw new Error("Only the assignee or participants can start the timer on this task");
       }
 
-      await pauseOtherRunningTaskTimers(ctx.user, input.taskId, now);
+      const forProjectPulse = input.ledger === "projectpulse";
+      if (!forProjectPulse) {
+        await pauseOtherRunningTaskTimers(ctx.user, input.taskId, now);
+      }
 
       const timeCol = await getCollection<TimeEntryDoc>(Collections.timeEntries);
+      const sourceFilter = forProjectPulse
+        ? { source: "projectpulse" as const }
+        : { source: { $ne: "projectpulse" as const } };
+      if (forProjectPulse) {
+        const otherPulse = await timeCol
+          .find({
+            userId: ctx.user.id,
+            taskId: { $ne: input.taskId, $type: "number" },
+            clockOut: null,
+            source: "projectpulse",
+          })
+          .toArray();
+        for (const open of otherPulse) {
+          const durationSeconds = Math.max(0, Math.floor((now.getTime() - open.clockIn.getTime()) / 1000));
+          await updateById<TimeEntryDoc>(Collections.timeEntries, open.id, {
+            clockOut: now,
+            duration: Math.floor(durationSeconds / 60),
+            durationSeconds,
+            updatedAt: now,
+          });
+        }
+      }
       // Close any leftover open session so each Start begins a fresh 00:00:00 run.
       const openEntries = await timeCol
         .find({
           userId: ctx.user.id,
           taskId: input.taskId,
           clockOut: null,
+          ...sourceFilter,
         })
         .toArray();
       for (const open of openEntries) {
@@ -1496,7 +1802,9 @@ export const taskRouter = createRouter({
           clockOut: now,
           duration: Math.floor(durationSeconds / 60),
           durationSeconds,
-          note: open.note?.includes("paused") ? open.note : "Task timer (auto-closed)",
+          note: forProjectPulse
+            ? (open.note || "ProjectPulse")
+            : (open.note?.includes("paused") ? open.note : "Task timer (auto-closed)"),
           updatedAt: now,
         });
       }
@@ -1505,35 +1813,37 @@ export const taskRouter = createRouter({
         userId: ctx.user.id,
         organizationId: requireOrganizationId(ctx.user),
         taskId: input.taskId,
-        projectId: task.projectId ?? null,
+        projectId: forProjectPulse && input.projectId != null ? input.projectId : (task.projectId ?? null),
         clockIn: now,
         clockOut: null,
         duration: null,
         durationSeconds: null,
-        note: "Task timer",
-        source: "web",
+        note: forProjectPulse ? (input.note?.trim() || "ProjectPulse") : "Task timer",
+        source: forProjectPulse ? "projectpulse" : "web",
         createdAt: now,
         updatedAt: now,
       });
 
-      // Activity + notifications are non-blocking so Start returns immediately.
-      void insertDoc<TaskActivityDoc>(Collections.taskActivity, {
-        taskId: input.taskId,
-        userId: ctx.user.id,
-        action: "time_logged",
-        oldValue: null,
-        newValue: "started timer",
-        metadata: null,
-        createdAt: now,
-      }).catch(() => undefined);
+      if (!forProjectPulse) {
+        // Activity + notifications are non-blocking so Start returns immediately.
+        void insertDoc<TaskActivityDoc>(Collections.taskActivity, {
+          taskId: input.taskId,
+          userId: ctx.user.id,
+          action: "time_logged",
+          oldValue: null,
+          newValue: "started timer",
+          metadata: null,
+          createdAt: now,
+        }).catch(() => undefined);
 
-      void notifyTaskMembers({
-        taskId: input.taskId,
-        actor: ctx.user,
-        type: "task_updated",
-        title: "Timer started",
-        message: `${actorLabel(ctx.user)} started the timer on "${task.title}"`,
-      }).catch(() => undefined);
+        void notifyTaskMembers({
+          taskId: input.taskId,
+          actor: ctx.user,
+          type: "task_updated",
+          title: "Timer started",
+          message: `${actorLabel(ctx.user)} started the timer on "${task.title}"`,
+        }).catch(() => undefined);
+      }
 
       return { taskId: input.taskId, startedAt: now };
     }),
@@ -1557,6 +1867,7 @@ export const taskRouter = createRouter({
           userId: ctx.user.id,
           taskId: input.taskId,
           clockOut: null,
+          source: { $ne: "projectpulse" },
         })
         .sort({ clockIn: -1 })
         .limit(1)
@@ -1599,7 +1910,10 @@ export const taskRouter = createRouter({
     }),
 
   stopTimer: authedQuery
-    .input(z.object({ taskId: z.number() }))
+    .input(z.object({
+      taskId: z.number(),
+      ledger: z.enum(["task", "projectpulse"]).optional(),
+    }))
     .mutation(async ({ ctx, input }) => {
       if (useTaskMock()) return mock.mockStopTaskTimer(ctx.user.id, input.taskId, ctx.user);
 
@@ -1610,6 +1924,7 @@ export const taskRouter = createRouter({
         throw new Error("Only the assignee or participants can stop the timer on this task");
       }
 
+      const forProjectPulse = input.ledger === "projectpulse";
       const now = new Date();
       const timeCol = await getCollection<TimeEntryDoc>(Collections.timeEntries);
       const entry = await timeCol
@@ -1617,6 +1932,9 @@ export const taskRouter = createRouter({
           userId: ctx.user.id,
           taskId: input.taskId,
           clockOut: null,
+          ...(forProjectPulse
+            ? { source: "projectpulse" as const }
+            : { source: { $ne: "projectpulse" as const } }),
         })
         .sort({ clockIn: -1 })
         .limit(1)
@@ -1636,23 +1954,25 @@ export const taskRouter = createRouter({
         updatedAt: now,
       });
 
-      await insertDoc<TaskActivityDoc>(Collections.taskActivity, {
-        taskId: input.taskId,
-        userId: ctx.user.id,
-        action: "time_logged",
-        oldValue: null,
-        newValue: `${duration} minutes`,
-        metadata: null,
-        createdAt: now,
-      });
+      if (!forProjectPulse) {
+        await insertDoc<TaskActivityDoc>(Collections.taskActivity, {
+          taskId: input.taskId,
+          userId: ctx.user.id,
+          action: "time_logged",
+          oldValue: null,
+          newValue: `${duration} minutes`,
+          metadata: null,
+          createdAt: now,
+        });
 
-      await notifyTaskMembers({
-        taskId: input.taskId,
-        actor: ctx.user,
-        type: "task_updated",
-        title: "Timer stopped",
-        message: `${actorLabel(ctx.user)} stopped the timer on "${task.title}" (${duration} min)`,
-      });
+        await notifyTaskMembers({
+          taskId: input.taskId,
+          actor: ctx.user,
+          type: "task_updated",
+          title: "Timer stopped",
+          message: `${actorLabel(ctx.user)} stopped the timer on "${task.title}" (${duration} min)`,
+        });
+      }
 
       return { durationMinutes: duration };
     }),
@@ -1686,6 +2006,7 @@ export const taskRouter = createRouter({
       const clockOut = new Date(input.clockOut);
       if (clockOut <= clockIn) throw new Error("End time must be after start time");
 
+      const forProjectPulse = entry.source === "projectpulse";
       const previousDurationSeconds =
         typeof entry.durationSeconds === "number" && entry.durationSeconds >= 0
           ? entry.durationSeconds
@@ -1698,9 +2019,6 @@ export const taskRouter = createRouter({
       const now = new Date();
       const noteSuffix = `(edited: ${input.reason.trim()})`;
       const note = entry.note ? `${entry.note} ${noteSuffix}` : noteSuffix;
-      const currentActualHours = parseFloat(task.actualHours ?? "0") || 0;
-      const adjustedActualHours =
-        currentActualHours + (durationSeconds - previousDurationSeconds) / 3600;
 
       const updated = await updateById<TimeEntryDoc>(Collections.timeEntries, input.entryId, {
         clockIn,
@@ -1711,28 +2029,34 @@ export const taskRouter = createRouter({
         source: entry.source === "manual" ? "manual" : entry.source,
         updatedAt: now,
       });
-      await updateById<TaskDoc>(Collections.tasks, input.taskId, {
-        actualHours: Math.max(0, adjustedActualHours).toFixed(2),
-        updatedAt: now,
-      });
 
-      await insertDoc<TaskActivityDoc>(Collections.taskActivity, {
-        taskId: input.taskId,
-        userId: ctx.user.id,
-        action: "time_logged",
-        oldValue: null,
-        newValue: `Time entry edited — ${duration} min`,
-        metadata: { entryId: input.entryId, reason: input.reason.trim() },
-        createdAt: now,
-      });
+      if (!forProjectPulse) {
+        const currentActualHours = parseFloat(task.actualHours ?? "0") || 0;
+        const adjustedActualHours =
+          currentActualHours + (durationSeconds - previousDurationSeconds) / 3600;
+        await updateById<TaskDoc>(Collections.tasks, input.taskId, {
+          actualHours: Math.max(0, adjustedActualHours).toFixed(2),
+          updatedAt: now,
+        });
 
-      await notifyTaskMembers({
-        taskId: input.taskId,
-        actor: ctx.user,
-        type: "task_updated",
-        title: "Time entry updated",
-        message: `${actorLabel(ctx.user)} edited time logged on "${task.title}"`,
-      });
+        await insertDoc<TaskActivityDoc>(Collections.taskActivity, {
+          taskId: input.taskId,
+          userId: ctx.user.id,
+          action: "time_logged",
+          oldValue: null,
+          newValue: `Time entry edited — ${duration} min`,
+          metadata: { entryId: input.entryId, reason: input.reason.trim() },
+          createdAt: now,
+        });
+
+        await notifyTaskMembers({
+          taskId: input.taskId,
+          actor: ctx.user,
+          type: "task_updated",
+          title: "Time entry updated",
+          message: `${actorLabel(ctx.user)} edited time logged on "${task.title}"`,
+        });
+      }
 
       return updated;
     }),
@@ -1759,38 +2083,42 @@ export const taskRouter = createRouter({
         throw new Error("Not allowed to delete this time entry");
       }
 
+      const forProjectPulse = entry.source === "projectpulse";
       const durationSeconds =
         typeof entry.durationSeconds === "number" && entry.durationSeconds >= 0
           ? entry.durationSeconds
           : (entry.duration ?? 0) * 60;
       const durationMinutes = Math.floor(durationSeconds / 60);
       const now = new Date();
-      const currentActualHours = parseFloat(task.actualHours ?? "0") || 0;
-      const adjustedActualHours = currentActualHours - durationSeconds / 3600;
 
       await timeCol.deleteOne({ id: input.entryId, taskId: input.taskId });
-      await updateById<TaskDoc>(Collections.tasks, input.taskId, {
-        actualHours: Math.max(0, adjustedActualHours).toFixed(2),
-        updatedAt: now,
-      });
 
-      await insertDoc<TaskActivityDoc>(Collections.taskActivity, {
-        taskId: input.taskId,
-        userId: ctx.user.id,
-        action: "time_logged",
-        oldValue: null,
-        newValue: `Time entry deleted — ${durationMinutes} min`,
-        metadata: { entryId: input.entryId },
-        createdAt: now,
-      });
+      if (!forProjectPulse) {
+        const currentActualHours = parseFloat(task.actualHours ?? "0") || 0;
+        const adjustedActualHours = currentActualHours - durationSeconds / 3600;
+        await updateById<TaskDoc>(Collections.tasks, input.taskId, {
+          actualHours: Math.max(0, adjustedActualHours).toFixed(2),
+          updatedAt: now,
+        });
 
-      await notifyTaskMembers({
-        taskId: input.taskId,
-        actor: ctx.user,
-        type: "task_updated",
-        title: "Time entry deleted",
-        message: `${actorLabel(ctx.user)} deleted time logged on "${task.title}"`,
-      });
+        await insertDoc<TaskActivityDoc>(Collections.taskActivity, {
+          taskId: input.taskId,
+          userId: ctx.user.id,
+          action: "time_logged",
+          oldValue: null,
+          newValue: `Time entry deleted — ${durationMinutes} min`,
+          metadata: { entryId: input.entryId },
+          createdAt: now,
+        });
+
+        await notifyTaskMembers({
+          taskId: input.taskId,
+          actor: ctx.user,
+          type: "task_updated",
+          title: "Time entry deleted",
+          message: `${actorLabel(ctx.user)} deleted time logged on "${task.title}"`,
+        });
+      }
 
       return { success: true as const };
     }),
@@ -1802,6 +2130,8 @@ export const taskRouter = createRouter({
       clockIn: z.string(),
       clockOut: z.string(),
       note: z.string().optional(),
+      ledger: z.enum(["task", "projectpulse"]).optional(),
+      projectId: z.number().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       if (useTaskMock()) {
@@ -1829,38 +2159,41 @@ export const taskRouter = createRouter({
       const duration = Math.floor(durationSeconds / 60);
       const now = new Date();
 
+      const forProjectPulse = input.ledger === "projectpulse";
       const entry = await insertDoc<TimeEntryDoc>(Collections.timeEntries, {
         userId: targetUserId,
         organizationId: requireOrganizationId(ctx.user),
         taskId: input.taskId,
-        projectId: task.projectId ?? null,
+        projectId: forProjectPulse && input.projectId != null ? input.projectId : (task.projectId ?? null),
         clockIn,
         clockOut,
         duration,
         durationSeconds,
-        note: input.note?.trim() || "Manual entry",
-        source: "manual",
+        note: input.note?.trim() || (forProjectPulse ? "ProjectPulse" : "Manual entry"),
+        source: forProjectPulse ? "projectpulse" : "manual",
         createdAt: now,
         updatedAt: now,
       });
 
-      await insertDoc<TaskActivityDoc>(Collections.taskActivity, {
-        taskId: input.taskId,
-        userId: ctx.user.id,
-        action: "time_logged",
-        oldValue: null,
-        newValue: `Manual time added — ${duration} min`,
-        metadata: { entryId: entry.id, targetUserId },
-        createdAt: now,
-      });
+      if (!forProjectPulse) {
+        await insertDoc<TaskActivityDoc>(Collections.taskActivity, {
+          taskId: input.taskId,
+          userId: ctx.user.id,
+          action: "time_logged",
+          oldValue: null,
+          newValue: `Manual time added — ${duration} min`,
+          metadata: { entryId: entry.id, targetUserId },
+          createdAt: now,
+        });
 
-      await notifyTaskMembers({
-        taskId: input.taskId,
-        actor: ctx.user,
-        type: "task_updated",
-        title: "Time logged",
-        message: `${actorLabel(ctx.user)} added ${duration} min of time on "${task.title}"`,
-      });
+        await notifyTaskMembers({
+          taskId: input.taskId,
+          actor: ctx.user,
+          type: "task_updated",
+          title: "Time logged",
+          message: `${actorLabel(ctx.user)} added ${duration} min of time on "${task.title}"`,
+        });
+      }
 
       return entry;
     }),

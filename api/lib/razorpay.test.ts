@@ -12,6 +12,8 @@ describe("razorpay plan charges", () => {
     expect(planRequiresPayment({ slug: "growth", amount: 999 })).toBe(true);
     expect(planRequiresPayment({ slug: "trial", amount: 499 })).toBe(false);
     expect(planRequiresPayment({ slug: "free", amount: 0 })).toBe(false);
+    expect(planRequiresPayment({ slug: "free-yearly", amount: 0 })).toBe(false);
+    expect(planRequiresPayment({ slug: "starter", amount: 0 })).toBe(false);
   });
 
   it("converts rupees to paise", () => {

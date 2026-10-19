@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, typ
 import { createPortal } from "react-dom";
 import { trpc } from "@/providers/trpc";
 import { useAuth } from "@/hooks/useAuth";
+import { useTaskLiveTimer } from "@/hooks/useTaskLiveTimer";
 import { useSidebarWidth } from "@/hooks/useSidebarWidth";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 import { useTaskStatusLabels } from "@/hooks/useTaskStatusLabels";
@@ -11,6 +12,7 @@ import {
   PriorityMetaSelect,
   isTaskPriority,
 } from "@/components/tasks/task-form-ui";
+import { toast } from "sonner";
 import { formatTimeAgo, formatElapsedHMS, cn, priorityConfig } from "@/lib/utils";
 import type { TaskTimerSource } from "@/components/tasks/TaskTrackedTimeDisplay";
 import { formatDueLabel, formatOverdueLabel, isTaskOverdue } from "@/lib/task-deadline";
@@ -98,7 +100,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  X, Clock, Play, Pause,
+  X, Clock, Timer, Play, Pause,
   Loader2, Plus, Minus, Link2, ExternalLink,
   Trash2, Pencil,
   Flame, UserPlus, Search, PanelRightClose, PanelRightOpen, MoreHorizontal,
@@ -474,6 +476,11 @@ function TaskPanelContent({
   const [observersExpanded, setObserversExpanded] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showSwitchTimerConfirm, setShowSwitchTimerConfirm] = useState(false);
+  const [switchKeepsStatus, setSwitchKeepsStatus] = useState(false);
+  const dayTimerTaskRef = useRef(taskId);
+  const dayTimerTitleRef = useRef(task.title);
+  const dayTimerNoteRef = useRef("ProjectPulse");
+  const dayTimerProjectRef = useRef<number | null>(null);
   // Desktop/laptop (lg+): chat open by default. Mobile/tablet: closed until toggled.
   // Desktop: open by default. Mobile: closed by default (task details only).
   const [showChatPanel, setShowChatPanel] = useState(() => {
@@ -605,6 +612,7 @@ function TaskPanelContent({
 
   const invalidateTimerQueries = (otherTaskId?: number) => {
     void utils.task.getMyActiveTimer.invalidate();
+    void utils.task.getTimesheet.invalidate();
     void utils.task.getTimeTracked.invalidate({ taskId });
     if (otherTaskId && otherTaskId !== taskId) {
       void utils.task.getActiveTimer.invalidate({ taskId: otherTaskId });
@@ -615,32 +623,44 @@ function TaskPanelContent({
   };
 
   const startTimerMutation = trpc.task.startTimer.useMutation({
-    onMutate: async ({ clientStartedAt }) => {
+    onMutate: async ({ clientStartedAt, taskId: targetTaskId, ledger }) => {
+      if (ledger === "projectpulse") return { projectPulse: true as const };
       await utils.task.getActiveTimer.cancel({ taskId });
       await utils.task.getMyActiveTimer.cancel();
       const previous = utils.task.getActiveTimer.getData({ taskId });
       const previousMine = utils.task.getMyActiveTimer.getData(undefined);
       const startedAt = clientStartedAt instanceof Date ? clientStartedAt : new Date();
+      const sameTask = targetTaskId === taskId;
       const optimistic = {
-        taskId,
+        taskId: targetTaskId,
         startedAt,
         paused: false,
         accumulatedSeconds: 0,
       };
-      onOptimisticTimerStart(startedAt);
-      utils.task.getActiveTimer.setData({ taskId }, optimistic);
+      if (sameTask) {
+        onOptimisticTimerStart(startedAt);
+        utils.task.getActiveTimer.setData({ taskId }, optimistic);
+      } else {
+        onOptimisticTimerClear();
+        utils.task.getActiveTimer.setData({ taskId }, null);
+      }
       utils.task.getMyActiveTimer.setData(undefined, {
         ...optimistic,
-        taskTitle: task.title,
+        taskTitle: sameTask ? task.title : dayTimerTitleRef.current,
       });
-      return { previous, previousMine };
+      return { previous, previousMine, projectPulse: false as const };
     },
     onError: (_error, _variables, context) => {
+      if (context?.projectPulse) return;
       onOptimisticTimerClear();
       utils.task.getActiveTimer.setData({ taskId }, context?.previous ?? null);
       utils.task.getMyActiveTimer.setData(undefined, context?.previousMine ?? null);
     },
     onSuccess: (data, variables) => {
+      if (variables.ledger === "projectpulse") {
+        void utils.task.getTimesheet.invalidate();
+        return;
+      }
       const startedAt = data.startedAt instanceof Date ? data.startedAt : new Date(data.startedAt);
       utils.task.getActiveTimer.setData(
         { taskId: variables.taskId },
@@ -653,13 +673,14 @@ function TaskPanelContent({
       );
       utils.task.getMyActiveTimer.setData(undefined, {
         taskId: variables.taskId,
-        taskTitle: task.title,
+        taskTitle: variables.taskId === taskId ? task.title : dayTimerTitleRef.current,
         startedAt,
         paused: false,
         accumulatedSeconds: 0,
       });
       // Light refresh only — avoid refetching getActiveTimer (wipes optimism / resets clock).
       void utils.task.getTimeTracked.invalidate({ taskId: variables.taskId });
+      void utils.task.getTimesheet.invalidate();
       if (myActiveTimer?.taskId && myActiveTimer.taskId !== variables.taskId) {
         void utils.task.getActiveTimer.invalidate({ taskId: myActiveTimer.taskId });
         void utils.task.getTimeTracked.invalidate({ taskId: myActiveTimer.taskId });
@@ -693,7 +714,8 @@ function TaskPanelContent({
   });
 
   const stopTimerMutation = trpc.task.stopTimer.useMutation({
-    onMutate: async () => {
+    onMutate: async ({ ledger }) => {
+      if (ledger === "projectpulse") return { projectPulse: true as const };
       await utils.task.getActiveTimer.cancel({ taskId });
       await utils.task.getMyActiveTimer.cancel();
       const previous = utils.task.getActiveTimer.getData({ taskId });
@@ -701,9 +723,10 @@ function TaskPanelContent({
       onOptimisticTimerClear();
       utils.task.getActiveTimer.setData({ taskId }, null);
       utils.task.getMyActiveTimer.setData(undefined, null);
-      return { previous, previousMine };
+      return { previous, previousMine, projectPulse: false as const };
     },
     onError: (_error, _variables, context) => {
+      if (context?.projectPulse) return;
       if (context?.previous !== undefined) {
         utils.task.getActiveTimer.setData({ taskId }, context.previous);
       }
@@ -711,7 +734,11 @@ function TaskPanelContent({
         utils.task.getMyActiveTimer.setData(undefined, context.previousMine);
       }
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
+      if (variables.ledger === "projectpulse") {
+        void utils.task.getTimesheet.invalidate();
+        return;
+      }
       invalidateTimerQueries();
     },
   });
@@ -806,6 +833,11 @@ function TaskPanelContent({
       : canManage ||
         isParticipant ||
         hasPermission(user, "time.edit_all"));
+  const todayKey = workZoneDateKey(new Date());
+  const daySheet = trpc.task.getTimesheet.useQuery(
+    { date: todayKey },
+    { enabled: canTrackTime, refetchInterval: isTimerRunning ? 15_000 : 60_000 },
+  );
   const canChangeOwner =
     !isClientPortalUser(user) &&
     String(task.creator?.role ?? "").toLowerCase() !== "client" &&
@@ -1196,14 +1228,44 @@ function TaskPanelContent({
       && myActiveTimer?.startedAt
       && !myActiveTimer.paused
     ) {
+      setSwitchKeepsStatus(false);
       setShowSwitchTimerConfirm(true);
       return;
     }
     doStartTimer();
   };
 
+  const beginDayTimer = () => {
+    startTimerMutation.mutate({
+      taskId: dayTimerTaskRef.current,
+      clientStartedAt: new Date(),
+      ledger: "projectpulse",
+      note: dayTimerNoteRef.current,
+      projectId: dayTimerProjectRef.current ?? undefined,
+    });
+  };
+
+  const handleDayTimerStart = (targetTaskId: number, title: string, note?: string, projectId?: number) => {
+    dayTimerTaskRef.current = targetTaskId;
+    dayTimerTitleRef.current = title;
+    dayTimerNoteRef.current = note?.trim() || "ProjectPulse";
+    dayTimerProjectRef.current = projectId ?? null;
+    const pulseRunning = daySheet.data?.running ?? null;
+    if (pulseRunning && pulseRunning.taskId !== targetTaskId) {
+      setSwitchKeepsStatus(true);
+      setShowSwitchTimerConfirm(true);
+      return;
+    }
+    beginDayTimer();
+  };
+
   const handleConfirmSwitchTimer = () => {
     setShowSwitchTimerConfirm(false);
+    if (switchKeepsStatus) {
+      setSwitchKeepsStatus(false);
+      beginDayTimer();
+      return;
+    }
     doStartTimer();
   };
 
@@ -1681,6 +1743,24 @@ function TaskPanelContent({
                       icon={Pencil}
                       label="Edit title"
                       onClick={startEditingTitle}
+                    />
+                  ) : null}
+                  {canTrackTime ? (
+                    <TaskDayTimerPopover
+                      currentTaskId={taskId}
+                      currentTaskTitle={task.title}
+                      currentProjectId={projectId}
+                      currentProjectName={task.project?.name ?? null}
+                      projects={projectsData}
+                      runningTaskId={daySheet.data?.running?.taskId ?? null}
+                      runningTitle={daySheet.data?.running?.taskTitle ?? null}
+                      runningStartedAt={daySheet.data?.running?.startedAt ?? null}
+                      todayKey={todayKey}
+                      starting={startTimerMutation.isPending}
+                      stopping={stopTimerMutation.isPending}
+                      active={daySheet.data?.running?.taskId === taskId}
+                      onStart={handleDayTimerStart}
+                      onStop={(targetTaskId) => stopTimerMutation.mutate({ taskId: targetTaskId, ledger: "projectpulse" })}
                     />
                   ) : null}
                   {isFavorite && (
@@ -2554,7 +2634,7 @@ function TaskPanelContent({
           <AlertDialogHeader>
             <AlertDialogTitle>Switch time tracking?</AlertDialogTitle>
             <AlertDialogDescription>
-              Time tracking is already running on &ldquo;{myActiveTimer?.taskTitle ?? "another task"}
+              Time tracking is already running on &ldquo;{(switchKeepsStatus ? daySheet.data?.running?.taskTitle : myActiveTimer?.taskTitle) ?? "another task"}
               &rdquo;. Starting time tracking on this task will pause the timer on that task. Do you
               want to continue?
             </AlertDialogDescription>
@@ -2598,6 +2678,349 @@ function TaskPanelContent({
         </AlertDialogContent>
       </AlertDialog>
     </>
+  );
+}
+
+const PULSE_HOUR_TYPES = [
+  { group: "Billable", items: ["Design", "Marketing", "Programming", "Project Management"] },
+  { group: "Non-Billable", items: ["Admin", "Internal", "Meetings"] },
+] as const;
+
+function formatPulseClock(totalSeconds: number) {
+  const safe = Math.max(0, Math.floor(totalSeconds));
+  const hours = Math.floor(safe / 3600);
+  const minutes = Math.floor((safe % 3600) / 60);
+  return `${hours}:${String(minutes).padStart(2, "0")}`;
+}
+
+function pulseEntryNote(notes: string, hourType: string) {
+  return [notes.trim(), hourType.trim()].filter(Boolean).join(" · ") || "ProjectPulse";
+}
+
+function parseDurationToSeconds(raw: string): number | null {
+  const value = raw.trim();
+  if (!value || value === "0" || value === "0:00" || value === "00:00:00") return 0;
+  const clock = /^(\d{1,3}):(\d{2})(?::(\d{2}))?$/.exec(value);
+  if (clock) {
+    const hours = Number(clock[1]);
+    const minutes = Number(clock[2]);
+    const seconds = clock[3] == null ? 0 : Number(clock[3]);
+    if (minutes >= 60 || seconds >= 60) return null;
+    return hours * 3600 + minutes * 60 + seconds;
+  }
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount < 0) return null;
+  return Math.round(amount * 3600);
+}
+
+function TaskDayTimerPopover({
+  currentTaskId,
+  currentTaskTitle,
+  currentProjectId,
+  currentProjectName,
+  projects,
+  runningTaskId,
+  runningTitle,
+  runningStartedAt,
+  todayKey,
+  starting,
+  stopping,
+  active,
+  onStart,
+  onStop,
+}: {
+  currentTaskId: number;
+  currentTaskTitle: string;
+  currentProjectId: number | null;
+  currentProjectName: string | null;
+  projects: Array<{ id: number; name: string; color?: string | null }>;
+  runningTaskId: number | null;
+  runningTitle: string | null;
+  runningStartedAt: Date | string | null;
+  todayKey: string;
+  starting: boolean;
+  stopping: boolean;
+  active: boolean;
+  onStart: (taskId: number, title: string, note?: string, projectId?: number) => void;
+  onStop: (taskId: number) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [projectId, setProjectId] = useState<number | "">(currentProjectId ?? "");
+  const [hoursDraft, setHoursDraft] = useState("0:00");
+  const [notes, setNotes] = useState(currentTaskTitle);
+  const [hourType, setHourType] = useState("Project Management");
+  const [hourMenuOpen, setHourMenuOpen] = useState(false);
+  const [projectMenuOpen, setProjectMenuOpen] = useState(false);
+  const [hourQuery, setHourQuery] = useState("");
+  const [savingHours, setSavingHours] = useState(false);
+  const { logout } = useAuth();
+  const selectedIsRunning = runningTaskId === currentTaskId && runningStartedAt != null;
+  const live = useTaskLiveTimer(
+    selectedIsRunning ? { startedAt: runningStartedAt, paused: false, accumulatedSeconds: 0 } : null,
+  );
+  const totalQuery = trpc.task.getProjectPulseTotal.useQuery(
+    { taskId: currentTaskId },
+    { enabled: open, refetchInterval: open && selectedIsRunning ? 1000 : false },
+  );
+
+  useEffect(() => {
+    if (!open) return;
+    setProjectId(currentProjectId ?? "");
+    setNotes(currentTaskTitle);
+    setHoursDraft("0:00");
+    setHourType("Project Management");
+    setHourQuery("");
+    setHourMenuOpen(false);
+    setProjectMenuOpen(false);
+  }, [open, currentProjectId, currentTaskId, currentTaskTitle]);
+
+  const utils = trpc.useUtils();
+  const addTime = trpc.task.addManualTimeEntry.useMutation();
+
+  const projectOptions = useMemo(() => {
+    if (currentProjectId == null || projects.some((project) => project.id === currentProjectId)) {
+      return projects;
+    }
+    return [{ id: currentProjectId, name: currentProjectName ?? "Project", color: null }, ...projects];
+  }, [projects, currentProjectId, currentProjectName]);
+
+  const selectedProjectName =
+    projectOptions.find((project) => project.id === projectId)?.name ?? currentProjectName ?? "Select a project";
+
+  const filteredHourTypes = useMemo(() => {
+    const query = hourQuery.trim().toLowerCase();
+    return PULSE_HOUR_TYPES.map((group) => ({
+      group: group.group,
+      items: group.items.filter((item) => !query || item.toLowerCase().includes(query)),
+    })).filter((group) => group.items.length > 0);
+  }, [hourQuery]);
+
+  const trackedLabel = formatPulseClock(totalQuery.data?.totalSeconds ?? 0);
+  const timeValue = selectedIsRunning ? formatPulseClock(live.elapsedSeconds) : hoursDraft;
+
+  async function logDuration(seconds: number) {
+    if (seconds <= 0 || savingHours) return;
+    setSavingHours(true);
+    try {
+      const [year, month, day] = todayKey.split("-").map(Number);
+      const clockIn = workZoneWallTimeToUtc(year!, month!, day!, 9, 0, 0, 0);
+      const clockOut = new Date(clockIn.getTime() + seconds * 1000);
+      await addTime.mutateAsync({
+        taskId: currentTaskId,
+        clockIn: clockIn.toISOString(),
+        clockOut: clockOut.toISOString(),
+        note: pulseEntryNote(notes, hourType),
+        ledger: "projectpulse",
+        projectId: typeof projectId === "number" ? projectId : undefined,
+      });
+      await utils.task.getTimesheet.invalidate();
+      await utils.task.getProjectPulseTotal.invalidate({ taskId: currentTaskId });
+      setHoursDraft("0:00");
+      toast.success("Time saved in ProjectPulse");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not save time");
+    } finally {
+      setSavingHours(false);
+    }
+  }
+
+  function handleStart() {
+    const seconds = parseDurationToSeconds(hoursDraft);
+    if (seconds == null) {
+      toast.error("Enter time like 00:30 or 01:30");
+      return;
+    }
+    if (seconds > 0) {
+      void logDuration(seconds);
+      return;
+    }
+    onStart(
+      currentTaskId,
+      currentTaskTitle,
+      pulseEntryNote(notes, hourType),
+      typeof projectId === "number" ? projectId : undefined,
+    );
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen} modal>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          title="Track time"
+          aria-label="Track time"
+          className={cn(
+            "relative z-10 flex h-9 w-9 items-center justify-center rounded-lg transition-colors",
+            active ? "bg-blue-50 text-[#2563EB] hover:bg-blue-100" : "text-gray-500 hover:bg-gray-100 hover:text-gray-800",
+          )}
+        >
+          <Timer size={18} />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="end"
+        side="bottom"
+        sideOffset={8}
+        className="z-[200] w-[360px] overflow-hidden p-0"
+        onOpenAutoFocus={(event) => event.preventDefault()}
+      >
+        <div className="flex items-center justify-between border-b-2 border-[#2563EB] bg-[#eff6ff] px-4 py-3">
+          <span className="text-sm font-bold tracking-tight text-[#1F2937]">ProjectPulse</span>
+          <div className="flex items-center gap-3 text-sm">
+            <a href="/projectpulse" className="font-medium text-[#2563EB] hover:underline">My timesheet</a>
+            <button
+              type="button"
+              onClick={() => logout("/projectpulse/login")}
+              className="font-medium text-[#2563EB] hover:underline"
+            >
+              Sign out
+            </button>
+          </div>
+        </div>
+        <div className="px-4 py-4">
+          <p className="text-sm font-medium text-[#1F2937]">Project / Task</p>
+          <button
+            type="button"
+            disabled={selectedIsRunning}
+            onClick={() => {
+              setProjectMenuOpen((value) => !value);
+              setHourMenuOpen(false);
+            }}
+            className="mt-2 flex w-full items-center justify-between rounded-lg border border-gray-300 bg-white px-3 py-2 text-left disabled:bg-gray-50"
+          >
+            <span className="min-w-0">
+              <span className="block truncate text-sm text-[#1F2937]">{selectedProjectName}</span>
+              <span className="block truncate text-sm text-gray-500">{currentTaskTitle}</span>
+            </span>
+            <ChevronDown size={16} className="shrink-0 text-gray-500" />
+          </button>
+          {projectMenuOpen ? (
+            <div className="mt-1 max-h-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-sm">
+              {projectOptions.map((project) => (
+                <button
+                  key={project.id}
+                  type="button"
+                  onClick={() => {
+                    setProjectId(project.id);
+                    setProjectMenuOpen(false);
+                  }}
+                  className={cn(
+                    "block w-full px-3 py-2 text-left text-sm",
+                    project.id === projectId ? "bg-[#111827] text-white" : "text-[#1F2937] hover:bg-gray-50",
+                  )}
+                >
+                  {project.name}
+                </button>
+              ))}
+            </div>
+          ) : null}
+
+          <button
+            type="button"
+            onClick={() => {
+              setHourMenuOpen((value) => !value);
+              setProjectMenuOpen(false);
+            }}
+            className="mt-3 flex h-11 w-full items-center justify-between rounded-lg border border-gray-300 bg-white px-3 text-left text-sm text-[#1F2937]"
+          >
+            <span className="truncate">{hourType}</span>
+            <ChevronDown size={16} className="shrink-0 text-gray-500" />
+          </button>
+          {hourMenuOpen ? (
+            <div className="mt-1 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+              <div className="flex items-center gap-2 border-b border-gray-200 px-3">
+                <Search size={15} className="text-gray-400" />
+                <input
+                  value={hourQuery}
+                  onChange={(event) => setHourQuery(event.target.value)}
+                  placeholder="Search..."
+                  className="h-10 w-full bg-transparent text-sm outline-none"
+                />
+              </div>
+              <div className="max-h-52 overflow-y-auto py-2">
+                {filteredHourTypes.map((group) => (
+                  <div key={group.group}>
+                    <p className="px-3 py-1.5 text-sm font-semibold text-[#1F2937]">{group.group}</p>
+                    {group.items.map((item) => (
+                      <button
+                        key={item}
+                        type="button"
+                        onClick={() => {
+                          setHourType(item);
+                          setHourMenuOpen(false);
+                          setHourQuery("");
+                        }}
+                        className={cn(
+                          "block w-full py-2 pl-6 pr-3 text-left text-sm",
+                          item === hourType ? "bg-[#111827] text-white" : "text-[#1F2937] hover:bg-gray-50",
+                        )}
+                      >
+                        {item}
+                      </button>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          <div className="mt-3 flex gap-2">
+            <input
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+              aria-label="Notes"
+              className="h-11 min-w-0 flex-1 rounded-lg border border-gray-300 px-3 text-sm text-[#1F2937] outline-none focus:border-[#2563EB]"
+            />
+            <input
+              value={timeValue}
+              readOnly={selectedIsRunning || savingHours}
+              aria-label="Time"
+              inputMode="decimal"
+              onChange={(event) => setHoursDraft(event.target.value)}
+              className="h-11 w-24 rounded-lg border border-gray-300 px-2 text-center font-mono text-lg tabular-nums text-[#1F2937] outline-none focus:border-[#2563EB] read-only:bg-gray-50"
+            />
+          </div>
+          {runningTaskId != null && !selectedIsRunning && runningTitle ? (
+            <p className="mt-2 text-xs text-gray-500">A timer is already running on “{runningTitle}”.</p>
+          ) : null}
+          <div className="mt-3 flex gap-2">
+            {selectedIsRunning ? (
+              <button
+                type="button"
+                onClick={() => onStop(currentTaskId)}
+                disabled={stopping}
+                className="h-10 rounded-lg bg-[#1C1917] px-4 text-sm font-semibold text-white disabled:opacity-60"
+              >
+                {stopping ? "Saving…" : "Stop"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleStart}
+                disabled={starting || savingHours}
+                className="h-10 rounded-lg bg-[#2563EB] px-4 text-sm font-semibold text-white disabled:opacity-60"
+              >
+                {savingHours || starting ? "Saving…" : "Start timer"}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="h-10 rounded-lg border border-gray-300 bg-white px-4 text-sm font-semibold text-[#1F2937]"
+            >
+              Cancel
+            </button>
+          </div>
+          <p className="mt-4 flex items-start gap-2 text-sm text-gray-600">
+            <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[#2563EB]" />
+            <span>
+              <span className="font-medium text-[#1F2937]">{currentTaskTitle}</span>
+              {" "}has {trackedLabel} tracked to it.
+            </span>
+          </p>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 

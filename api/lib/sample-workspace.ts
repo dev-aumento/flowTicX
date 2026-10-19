@@ -89,7 +89,7 @@ const SAMPLE_PROJECTS: SampleProject[] = [
 
 export function isFreePlan(plan: string | null | undefined) {
   const slug = (plan ?? "trial").trim().toLowerCase();
-  return slug === "trial" || slug === "free" || slug.startsWith("free-");
+  return slug === "trial" || slug === "free" || slug.startsWith("free-") || slug.startsWith("trial-");
 }
 
 /** Free stays at the plan cap (3). Every other plan gets five sample projects, still within its cap. */

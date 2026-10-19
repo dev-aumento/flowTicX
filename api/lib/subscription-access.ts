@@ -85,6 +85,7 @@ export function canStartIntroPlanTrial(org: OrganizationDoc) {
 
 export function subscriptionExpiryDate(org: OrganizationDoc, durationDays?: number) {
   const plan = org.plan ?? "trial";
+  if (isFreeTierPlan(plan)) return null;
   const start = org.planStartsAt ?? org.purchasedAt ?? org.createdAt;
   if (start) return addPlanDuration(new Date(start), plan, durationDays);
   return org.planExpiresAt ? new Date(org.planExpiresAt) : null;

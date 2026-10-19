@@ -168,7 +168,7 @@ export function PlatformLayout() {
   const sidebar: ReactNode = (
     <PlatformSidebar
       unreadCount={unreadCount}
-      onLogout={logout}
+      onLogout={() => logout()}
       onNavigate={isDrawer ? () => setDrawerOpen(false) : undefined}
     />
   );

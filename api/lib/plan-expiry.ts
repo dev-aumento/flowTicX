@@ -2,7 +2,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 export function isFreeTierPlan(plan: string | null | undefined) {
   const slug = (plan ?? "trial").trim().toLowerCase();
-  return slug === "trial" || slug === "free" || slug.startsWith("free-");
+  return slug === "trial" || slug === "free" || slug.startsWith("free-") || slug.startsWith("trial-");
 }
 
 export function endOfPlanDay(value: Date) {

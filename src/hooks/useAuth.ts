@@ -115,6 +115,12 @@ export function useAuth(_options?: UseAuthOptions) {
       writeAuthCache(result.user);
       utils.auth.me.setData(undefined, result.user);
       await utils.invalidate();
+      const redirect = sessionStorage.getItem("auth-redirect");
+      if (redirect && redirect.startsWith("/") && !redirect.startsWith("//")) {
+        sessionStorage.removeItem("auth-redirect");
+        navigate(redirect);
+        return;
+      }
       navigate(getDefaultHomePath(result.user));
     },
   });
@@ -361,8 +367,8 @@ export function useAuth(_options?: UseAuthOptions) {
     [baseUser],
   );
 
-  const logout = useCallback(() => {
-    const loginPath = getLoginPathForUser(effectiveUser ?? readAuthCache()) || LOGIN_PATH;
+  const logout = useCallback((loginPathOverride?: string) => {
+    const loginPath = loginPathOverride || getLoginPathForUser(effectiveUser ?? readAuthCache()) || LOGIN_PATH;
     if (AUTH_DISABLED) {
       clearAuthCache();
       utils.auth.me.setData(undefined, undefined);
