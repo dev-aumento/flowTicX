@@ -48,7 +48,14 @@ import { readCommentReactions, toggleUserReaction } from "@/lib/comment-reaction
 import { pauseOtherRunningTaskTimers } from "./lib/task-timers";
 import { belongsToUserOrg, orgFilter, requireOrganizationId } from "./lib/tenant";
 import { resolveTenantProjectPipelineStages } from "./lib/org-task-status-labels";
-import { isInvitedStaffClient, resolveProjectForInvitedClientTask } from "./lib/client-projects";
+import {
+  filterProjectsForInvitedClient,
+  isInvitedStaffClient,
+  listOrganizationProjects,
+  loadJoinedProjectIds,
+  normalizeProjectName,
+  resolveProjectForInvitedClientTask,
+} from "./lib/client-projects";
 import {
   assertInvitedClientAssigneeAllowed,
   assertTaskAssigneeAllowed,
@@ -185,6 +192,10 @@ type TimesheetEntry = {
   durationSeconds: number;
   note: string | null;
   running: boolean;
+  userId: number;
+  userName: string;
+  /** False for teammates' time a client sees on shared projects (read-only). */
+  mine: boolean;
 };
 
 type TimesheetTask = {
@@ -247,6 +258,46 @@ function timesheetEntrySeconds(entry: TimeEntryDoc, now: Date) {
     return entry.durationSeconds;
   }
   return Math.max(0, Math.floor((entry.clockOut.getTime() - entry.clockIn.getTime()) / 1000));
+}
+
+/**
+ * Projects whose ProjectPulse time a client sees: the projects shown in their
+ * portal. Null for staff, whose timesheet stays their own.
+ */
+async function clientPulseProjectIds(user: SafeUser): Promise<number[] | null> {
+  if (String(user.role ?? "").toLowerCase() !== "client") return null;
+  const projects = await listOrganizationProjects(requireOrganizationId(user));
+  if (!(await isInvitedStaffClient(user))) return projects.map((project) => project.id);
+  const joinedIds = await loadJoinedProjectIds(user.id);
+  // The portal lists one project per name; time logged on a same-named copy belongs to it too.
+  const sharedNames = new Set(
+    filterProjectsForInvitedClient(projects, user.id, joinedIds).map((project) =>
+      normalizeProjectName(project.name),
+    ),
+  );
+  return projects
+    .filter((project) => sharedNames.has(normalizeProjectName(project.name)))
+    .map((project) => project.id);
+}
+
+/** Mongo filter for the ProjectPulse entries a user may read. */
+async function pulseEntryScope(user: SafeUser): Promise<Record<string, unknown>> {
+  const sharedProjectIds = await clientPulseProjectIds(user);
+  if (!sharedProjectIds?.length) return { userId: user.id };
+  const taskCol = await getCollection<TaskDoc>(Collections.tasks);
+  const sharedTaskIds = (
+    await taskCol
+      .find({ projectId: { $in: sharedProjectIds }, ...orgFilter(user) })
+      .project({ id: 1 })
+      .toArray()
+  ).map((task) => task.id as number);
+  return {
+    $or: [
+      { userId: user.id },
+      { ...orgFilter(user), projectId: { $in: sharedProjectIds } },
+      { ...orgFilter(user), projectId: null, taskId: { $in: sharedTaskIds } },
+    ],
+  };
 }
 
 /** Files section / task.attachments: exclude comment-only media. */
@@ -1519,9 +1570,11 @@ export const taskRouter = createRouter({
       const weekStart = dayBounds(week[0]!.date).start;
       const weekEnd = dayBounds(week[6]!.date).end;
       const timeCol = await getCollection<TimeEntryDoc>(Collections.timeEntries);
+      // Clients also see the team's time on projects shared in their portal.
+      const scope = await pulseEntryScope(ctx.user);
       const ranged = await timeCol
         .find({
-          userId: ctx.user.id,
+          ...scope,
           taskId: { $ne: null, $type: "number" },
           source: "projectpulse",
           clockIn: { $gte: weekStart, $lte: weekEnd },
@@ -1559,6 +1612,7 @@ export const taskRouter = createRouter({
         ? await projectCol.find({ id: { $in: projectIds } }).project({ id: 1, name: 1, color: 1 }).toArray()
         : [];
       const projectMap = new Map(projects.map((project) => [project.id, project]));
+      const entryUsers = await findUsersByIds([...new Set(entries.map((entry) => entry.userId))]);
 
       const weekSeconds = new Map(week.map((day) => [day.date, 0]));
       const weekRowMap = new Map<string, TimesheetWeekRow>();
@@ -1616,8 +1670,11 @@ export const taskRouter = createRouter({
           };
           bucket.tasks.push(taskBucket);
         }
-        const isRunning = entry.clockOut == null;
+        const mine = sameUserId(entry.userId, ctx.user.id);
+        // Only the viewer's own timer is live and controllable here.
+        const isRunning = entry.clockOut == null && mine;
         if (dayKey === input.date) {
+          const entryUser = entryUsers.get(entry.userId);
           taskBucket.entries.push({
             id: entry.id,
             clockIn: entry.clockIn,
@@ -1625,6 +1682,9 @@ export const taskRouter = createRouter({
             durationSeconds: seconds,
             note: entry.note,
             running: isRunning,
+            userId: entry.userId,
+            userName: entryUser?.name || entryUser?.email || "Team member",
+            mine,
           });
           bucket.totalSeconds += seconds;
           taskBucket.totalSeconds += seconds;
@@ -1675,7 +1735,7 @@ export const taskRouter = createRouter({
       const timeCol = await getCollection<TimeEntryDoc>(Collections.timeEntries);
       const entries = await timeCol
         .find({
-          userId: ctx.user.id,
+          ...(await pulseEntryScope(ctx.user)),
           taskId: input.taskId,
           source: "projectpulse",
         })

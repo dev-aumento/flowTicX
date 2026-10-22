@@ -631,20 +631,17 @@ export default function Login() {
         <footer className="relative z-10 flex flex-col gap-2 px-5 py-4 text-xs text-gray-400 sm:flex-row sm:items-center sm:justify-between sm:px-8">
           <p>© {new Date().getFullYear()} AASO. All rights reserved.</p>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-          <Link to="/privacy" className="hover:text-[#2563EB]">
+          <Link to="https://aaso.tech/privacy-policy/" className="hover:text-[#2563EB]">
               Privacy
             </Link>
-            <Link to="/terms" className="hover:text-[#2563EB]">
+            <Link to="https://aaso.tech/terms-of-service/" className="hover:text-[#2563EB]">
               Terms
             </Link>
-            <Link to="/help" className="hover:text-[#2563EB]">
+            <Link to="https://aaso.tech/help-center/" className="hover:text-[#2563EB]">
               Help
             </Link>
             <Link to="/client/login" className="hover:text-[#2563EB]">
               Client portal
-            </Link>
-            <Link to="/admin/login" className="hover:text-[#2563EB]">
-              Platform admin
             </Link>
           </div>
         </footer>

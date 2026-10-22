@@ -252,9 +252,10 @@ export default function RenewPricing() {
           </p>
         ) : (
           <>
-            <div className="hidden items-stretch gap-4 xl:grid xl:grid-cols-5">
+            {/* Five-up card width, centered so a shorter row (e.g. yearly, no free tier) sits in the middle. */}
+            <div className="hidden items-stretch justify-center gap-4 xl:flex">
               {visiblePlans.map((plan) => (
-                <div key={plan.slug} className="h-full min-w-0">
+                <div key={plan.slug} className="min-w-0 xl:w-[calc((100%-4rem)/5)]">
                   {renderPlanCard(plan)}
                 </div>
               ))}
@@ -266,7 +267,8 @@ export default function RenewPricing() {
                 opts={{ align: "start", containScroll: "trimSnaps" }}
                 className="w-full"
               >
-                <CarouselContent className="-ml-3 md:-ml-4">
+                {/* safe center: centered when the cards fit, start-aligned once they scroll. */}
+                <CarouselContent className="-ml-3 [justify-content:safe_center] md:-ml-4">
                   {visiblePlans.map((plan) => (
                     <CarouselItem key={plan.slug} className="basis-[88%] pl-3 pt-5 sm:basis-[70%] md:basis-1/2 md:pl-4 lg:basis-1/3">
                       {renderPlanCard(plan)}

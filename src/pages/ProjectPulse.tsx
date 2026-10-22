@@ -1,12 +1,14 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router";
-import { ChevronLeft, ChevronRight, CalendarDays, Loader2, Plus, Timer } from "lucide-react";
+import { ChevronLeft, ChevronRight, CalendarDays, LayoutDashboard, Loader2, LogOut, Plus, Timer } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/providers/trpc";
 import { useAuth } from "@/hooks/useAuth";
 import { useTaskLiveTimer } from "@/hooks/useTaskLiveTimer";
 import { workZoneDateKey, workZoneWallTimeToUtc, formatWorkZoneDateKey } from "@/lib/timezone";
 import { cn } from "@/lib/utils";
+import { getDefaultHomePath } from "@/lib/permissions";
+import { UserAvatar } from "@/components/shared/UserAvatar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { calendarDateValue, parseDateValue } from "@/components/time-tracking/WorktimeClockPicker";
@@ -334,15 +336,38 @@ export default function ProjectPulse() {
             Timesheet
           </p>
         </nav>
-        <div className="mt-auto border-t border-[#E5E7EB] px-4 py-4 text-sm">
-          <p className="truncate font-medium">{user?.name}</p>
-          <div className="mt-2 flex items-center gap-3 text-[#6B7280]">
-            <Link to="/" className="hover:text-[#1F2937]">AASO</Link>
-            <button type="button" onClick={() => logout("/projectpulse/login")} className="hover:text-[#1F2937]">
+        <ul className="mt-auto space-y-1 border-t border-[#E5E7EB] px-3 py-4 text-sm">
+          <li className="pb-1">
+            <Link
+              to="/settings"
+              state={{ tab: "profile" }}
+              title="Open profile settings"
+              className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-[#EEF2F7]"
+            >
+              <UserAvatar name={user?.name} avatar={user?.avatar} size={32} />
+              <span className="min-w-0 truncate font-medium">{user?.name}</span>
+            </Link>
+          </li>
+          <li>
+            <Link
+              to={getDefaultHomePath(user)}
+              className="flex items-center gap-2.5 rounded-lg px-2 py-2 text-[#4B5563] hover:bg-[#EEF2F7] hover:text-[#1F2937]"
+            >
+              <LayoutDashboard size={16} />
+              Back to Dashboard
+            </Link>
+          </li>
+          <li>
+            <button
+              type="button"
+              onClick={() => logout("/projectpulse/login")}
+              className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-[#4B5563] hover:bg-[#EEF2F7] hover:text-[#1F2937]"
+            >
+              <LogOut size={16} />
               Log out
             </button>
-          </div>
-        </div>
+          </li>
+        </ul>
       </aside>
 
       <div className="min-w-0 flex-1">
@@ -626,6 +651,9 @@ export default function ProjectPulse() {
                             >
                               {task.title}
                             </Link>
+                            {entry.mine ? null : (
+                              <p className="mt-0.5 truncate text-xs text-[#6B7280]">by {entry.userName}</p>
+                            )}
                             {isEditing ? (
                               <div className="mt-2 flex flex-wrap items-center gap-2">
                                 <input
@@ -657,7 +685,7 @@ export default function ProjectPulse() {
                             ) : null}
                           </div>
                           <div className="flex w-48 shrink-0 items-center justify-end gap-2 pr-3">
-                            {isRunning ? (
+                            {!entry.mine ? null : isRunning ? (
                               <button
                                 type="button"
                                 onClick={() => stopTimer.mutate({ taskId: task.taskId, ledger: "projectpulse" })}
@@ -678,7 +706,7 @@ export default function ProjectPulse() {
                                 Start
                               </button>
                             )}
-                            {isRunning ? null : (
+                            {isRunning || !entry.mine ? null : (
                               <button
                                 type="button"
                                 onClick={() => {

@@ -69,16 +69,17 @@ export function TodayBirthdaysBanner({
     staleTime: 60_000,
   });
 
+  const { todayKey, weekEndKey } = sundaySaturdayWeek();
   const weekHolidays = useMemo(() => {
-    const { todayKey, weekStartKey, weekEndKey } = sundaySaturdayWeek();
+    // Only today and the rest of this week; holidays already past are hidden.
     return (holidaysData?.holidays ?? [])
-      .filter((h) => h.date >= weekStartKey && h.date <= weekEndKey)
+      .filter((h) => h.date >= todayKey && h.date <= weekEndKey)
       .sort((a, b) => a.date.localeCompare(b.date) || a.name.localeCompare(b.name))
       .map((h) => ({
         ...h,
         isToday: h.date === todayKey,
       }));
-  }, [holidaysData]);
+  }, [holidaysData, todayKey, weekEndKey]);
 
   if (todayBirthdays.length === 0 && weekHolidays.length === 0) return null;
 
